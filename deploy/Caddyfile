@@ -1,6 +1,12 @@
 # PUBLIC_DOMAIN: localhost in dev. TLS_ISSUER: "internal" in dev, the ACME account email in production.
 # Client-sent X-Forwarded-For is not trusted (no trusted_proxies): caddy sets it from the TCP peer,
 # and the api trusts exactly this one hop (SPEC §8.6).
+{
+	# Browsers send no SNI when the site is opened by IP (e.g. https://10.10.205.101). Inside Docker the
+	# local address is the container IP, so without this caddy finds no certificate (ERR_SSL_PROTOCOL_ERROR).
+	default_sni {$PUBLIC_DOMAIN:localhost}
+}
+
 {$PUBLIC_DOMAIN:localhost} {
 	tls {$TLS_ISSUER:internal}
 
