@@ -1,0 +1,47 @@
+{
+  "name": "@olt/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "source": "./src/testing.ts",
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    }
+  },
+  "scripts": {
+    "generate": "prisma generate",
+    "build": "prisma generate && tsc -p tsconfig.build.json",
+    "typecheck": "prisma generate && tsc --noEmit",
+    "test": "vitest run",
+    "test:int": "prisma generate && vitest run --mode int",
+    "migrate": "prisma migrate deploy",
+    "seed": "tsx --conditions=source src/seed.ts",
+    "seed:mock": "tsx --conditions=source src/seed-mock.ts"
+  },
+  "files": [
+    "dist",
+    "prisma",
+    "prisma.config.ts"
+  ],
+  "dependencies": {
+    "@node-rs/argon2": "^2.2.2",
+    "@olt/shared": "workspace:*",
+    "@prisma/adapter-pg": "~7.10.1",
+    "@prisma/client": "~7.10.1",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^12.2.1",
+    "@types/pg": "^8.23.1",
+    "prisma": "~7.10.1",
+    "tsx": "^4.23.15"
+  }
+}

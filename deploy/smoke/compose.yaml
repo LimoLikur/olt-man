@@ -1,0 +1,20 @@
+# Usage on the VPS: PUBLIC_DOMAIN=olt.example.com docker compose -f deploy/smoke/compose.yaml up
+services:
+  caddy:
+    image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - smoke_data:/data
+    read_only: true
+    tmpfs: [/tmp, /config]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+
+volumes:
+  smoke_data: {}

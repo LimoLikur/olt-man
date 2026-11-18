@@ -1,0 +1,45 @@
+{
+  "name": "@olt/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./crypto": {
+      "source": "./src/crypto/index.ts",
+      "types": "./dist/crypto/index.d.ts",
+      "default": "./dist/crypto/index.js"
+    },
+    "./jobs": {
+      "source": "./src/jobs.ts",
+      "types": "./dist/jobs.d.ts",
+      "default": "./dist/jobs.js"
+    },
+    "./dto": {
+      "source": "./src/dto/index.ts",
+      "types": "./dist/dto/index.d.ts",
+      "default": "./dist/dto/index.js"
+    },
+    "./ssh-algorithms": {
+      "source": "./src/ssh-algorithms.ts",
+      "types": "./dist/ssh-algorithms.d.ts",
+      "default": "./dist/ssh-algorithms.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:int": "vitest run --mode int"
+  },
+  "dependencies": {
+    "zod": "^4.1.0"
+  },
+  "files": [
+    "dist"
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "name": "mock-olt",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --openssl-legacy-provider dist/main.js",
+    "seed": "tsx --conditions=source src/seed.ts",
+    "scenario": "tsx --conditions=source src/bin/scenario.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:int": "vitest run --mode int",
+    "dev": "tsx --openssl-legacy-provider --conditions=source src/main.ts",
+    "record-synthetic": "tsx --conditions=source src/bin/record-synthetic.ts",
+    "redact": "tsx --conditions=source src/bin/redact.ts"
+  },
+  "dependencies": {
+    "@olt/olt-spec": "workspace:*",
+    "@olt/shared": "workspace:*",
+    "net-snmp": "^3.29.2",
+    "ssh2": "^1.17.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/net-snmp": "^3.23.0",
+    "@types/ssh2": "^1.15.6",
+    "fast-check": "^4.10.2"
+  },
+  "files": [
+    "dist",
+    "fixtures"
+  ],
+  "bin": {
+    "scenario": "./dist/bin/scenario.js"
+  },
+  "exports": {
+    "./testing": {
+      "source": "./src/testing.ts",
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+diff --git a/index.js b/index.js
+index dafca61bc28c0877cb5aa7e7cdcf87f5b08f65aa..b076344ca6af64728b15d83ef054745d124b2c5c 100644
+--- a/index.js
++++ b/index.js
+@@ -3361,7 +3361,22 @@ Listener.processIncoming = function (buffer, authorizer, callback) {
+ 					" requires privacy but message does not provide it"));
+ 			return;
+ 		}
+-		if ( ! message.processIncomingSecurity (message.user, callback) ) {
++		// Patched (olt-man mock): answer wrong digests / decryption failures with the USM
++		// Report PDU required by RFC 3414 §3.2 instead of silently dropping the request.
++		let securityError;
++		if ( ! message.processIncomingSecurity (message.user, (error) => { securityError = error; }) ) {
++			if ( securityError && message.isReportable () &&
++					( securityError.code == ResponseInvalidCode.EAuthFailure || securityError.code == ResponseInvalidCode.ECouldNotDecrypt ) ) {
++				callback (securityError);
++				return {
++					original: message,
++					report: true,
++					errorType: securityError.code == ResponseInvalidCode.EAuthFailure ? UsmErrorType.WRONG_DIGESTS : UsmErrorType.DECRYPTION_ERROR
++				};
++			}
++			if ( securityError ) {
++				callback (securityError);
++			}
+ 			return;
+ 		}
+ 	} else {

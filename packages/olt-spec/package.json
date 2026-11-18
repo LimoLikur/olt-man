@@ -1,0 +1,30 @@
+{
+  "name": "@olt/olt-spec",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:int": "vitest run --mode int",
+    "parse": "tsx --conditions=source src/bin/parse.ts"
+  },
+  "dependencies": {
+    "@olt/shared": "workspace:*",
+    "zod": "^4.1.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "devDependencies": {
+    "fast-check": "^4.10.2"
+  }
+}

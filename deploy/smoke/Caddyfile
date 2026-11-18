@@ -1,0 +1,9 @@
+# K3 smoke test: proves DNS, port forward and Let's Encrypt work, and that the client IP
+# seen by Caddy is the phone's public IP (no SNAT on the office router).
+{$PUBLIC_DOMAIN} {
+	log {
+		output stdout
+		format json
+	}
+	respond "smoke ok, your IP as seen by caddy: {remote_host}" 200
+}

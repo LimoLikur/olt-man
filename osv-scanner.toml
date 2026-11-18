@@ -1,0 +1,38 @@
+# Accepted OSV findings, each with a reason and an expiry (PLAN J1). When ignoreUntil passes, CI
+# fails again: update the package then (pnpm minimumReleaseAge = 7 days, CLAUDE.md).
+# Decision 26 Okt 2026 (pemilik repo): keep the 7-day rule; patch after the demo.
+
+# body-parser 2.3.0 -> 2.4.0 (released 22 Oct, eligible 29 Oct). Reaches the internet-facing api
+# (express JSON body parsing). Risk accepted for the demo window.
+[[IgnoredVulns]]
+id = "GHSA-27r3-jxmh-p828"
+ignoreUntil = 2026-10-30T00:00:00Z
+reason = "DoS via trailing bytes; fix 2.4.0 younger than minimumReleaseAge until 29 Oct. Accepted for the demo; update on 29 Oct."
+
+# multer 2.4.0 -> 2.5.0 (released 22 Oct). Pulled in by @nestjs/platform-express; the api has no
+# multipart/upload endpoint, so the vulnerable path is not reachable.
+[[IgnoredVulns]]
+id = "GHSA-q7qp-rjg7-q26m"
+ignoreUntil = 2026-10-30T00:00:00Z
+reason = "DoS via pending file upload; no upload route uses multer. Fix 2.5.0 eligible 29 Oct."
+
+# fast-uri 3.1.8 -> 3.1.9: dev-only (prisma CLI -> @prisma/dev -> ajv), not in runtime images.
+[[IgnoredVulns]]
+id = "GHSA-333x-w4r6-6crp"
+ignoreUntil = 2026-10-30T00:00:00Z
+reason = "Dev dependency of the Prisma CLI only; not shipped. Fix 3.1.9 eligible 26 Oct 23:05 UTC."
+
+[[IgnoredVulns]]
+id = "GHSA-w74x-v6f9-j3xg"
+ignoreUntil = 2026-10-30T00:00:00Z
+reason = "Dev dependency of the Prisma CLI only; not shipped. Fix 3.1.9 eligible 26 Oct 23:05 UTC."
+
+[[IgnoredVulns]]
+id = "GHSA-wjr9-j795-jxcr"
+ignoreUntil = 2026-10-30T00:00:00Z
+reason = "Dev dependency of the Prisma CLI only; not shipped. Fix 3.1.9 eligible 26 Oct 23:05 UTC."
+
+[[IgnoredVulns]]
+id = "GHSA-xhq7-xmqj-769h"
+ignoreUntil = 2026-10-30T00:00:00Z
+reason = "Dev dependency of the Prisma CLI only; not shipped. Fix 3.1.9 eligible 26 Oct 23:05 UTC."

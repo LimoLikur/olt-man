@@ -1,0 +1,30 @@
+{
+  "name": "olt-man",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "pnpm -r --parallel typecheck && tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:int": "pnpm --filter @olt/db generate && vitest run --mode int",
+    "e2e": "pnpm --filter ui e2e",
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "keys:generate": "tsx scripts/keys-generate.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "@swc/core": "^1.16.0",
+    "@types/node": "^24.19.0",
+    "eslint": "^10.0.0",
+    "globals": "^16.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.60.0",
+    "unplugin-swc": "^2.0.0",
+    "vitest": "^5.0.0"
+  }
+}

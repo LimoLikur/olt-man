@@ -1,0 +1,223 @@
+# Profiles (SPEC §9): no profile = production core, `dev` = core + mock-olt with tls internal,
+# `demo` = production + mock-olt.
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  restart: unless-stopped
+
+x-mock-olt: &mock-olt
+  <<: *hardening
+  user: "1000:1000"
+  build: { context: ., dockerfile: apps/mock-olt/Dockerfile }
+  image: olt-man/mock-olt:dev
+  profiles: [dev, demo]
+  sysctls:
+    net.ipv4.ip_unprivileged_port_start: 0
+  tmpfs: [/tmp]
+
+services:
+  caddy:
+    <<: *hardening
+    user: "1000:1000"
+    build: { context: ., dockerfile: apps/ui/Dockerfile }
+    image: olt-man/caddy:dev
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-localhost}
+      TLS_ISSUER: ${TLS_ISSUER:-internal}
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: 0
+    ports:
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTP_PORT:-80}:80"
+    tmpfs: [/tmp]
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    depends_on:
+      api: { condition: service_healthy }
+
+  # One-shot: applies Prisma migrations before api and worker start.
+  migrate:
+    <<: *hardening
+    user: "1000:1000"
+    build: { context: ., dockerfile: packages/db/Dockerfile }
+    image: olt-man/db:dev
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    tmpfs: [/tmp]
+    networks: [internal]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # dev only: users from SEED_* and mock-1..3 (fake credentials sealed with the public key).
+  # No build of its own: `docker compose build migrate` rebuilds olt-man/db:dev for both.
+  seed:
+    <<: *hardening
+    user: "1000:1000"
+    image: olt-man/db:dev
+    profiles: [dev]
+    restart: "no"
+    command: ["sh", "-c", "node dist/seed.js && node dist/seed-mock.js"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      OLT_CRED_PUBLIC_KEY_FILE: /run/secrets/olt_cred_pub
+      NODE_ENV: development
+    secrets: [olt_cred_pub]
+    tmpfs: [/tmp]
+    networks: [internal]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  api:
+    <<: *hardening
+    user: "1000:1000"
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    image: olt-man/api:dev
+    env_file: .env
+    environment:
+      # Login role in `app` (no UPDATE/DELETE on audit_log); falls back to the owner in dev.
+      DATABASE_URL: postgresql://${APP_DB_USER:-${POSTGRES_USER}}:${APP_DB_PASSWORD:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      OLT_CRED_PUBLIC_KEY_FILE: /run/secrets/olt_cred_pub
+    # Public key only: the api can seal credentials, never open them (SPEC §2.2 no. 1).
+    secrets: [olt_cred_pub]
+    tmpfs: [/tmp]
+    networks: [edge, internal]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  worker:
+    <<: *hardening
+    user: "1000:1000"
+    build: { context: ., dockerfile: apps/worker/Dockerfile }
+    image: olt-man/worker:dev
+    env_file: .env
+    environment:
+      # Login role in `app` (no UPDATE/DELETE on audit_log); falls back to the owner in dev.
+      DATABASE_URL: postgresql://${APP_DB_USER:-${POSTGRES_USER}}:${APP_DB_PASSWORD:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      HEARTBEAT_FILE: /tmp/worker-heartbeat
+      OLT_CRED_PRIVATE_KEY_FILE: /run/secrets/olt_cred_key
+    # The only container with the private key (CLAUDE.md rule 5).
+    secrets: [olt_cred_key]
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: 0
+    tmpfs: [/tmp]
+    networks: [internal, oltnet]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+      # dev: start after the seed; other profiles have no seed service (required: false).
+      seed: { condition: service_completed_successfully, required: false }
+
+  postgres:
+    <<: *hardening
+    image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+    user: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    tmpfs: [/tmp, /var/run/postgresql]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    <<: *hardening
+    image: redis:7.4-alpine@sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541
+    user: redis
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    tmpfs: [/tmp]
+    volumes:
+      - redis_data:/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Mock OLTs (fake credentials only). Static IPs on oltnet = MOCK_OLT_CIDRS / OLT_TARGET_CIDRS in dev.
+  mock-olt-1:
+    <<: *mock-olt
+    # Initial engine ID = MOCK_OLTS in packages/shared/src/mock-credentials.ts (seed-mock pins it).
+    environment: { MOCK_INSTANCE: mock-1, MOCK_ENGINE_ID: 80000f3e05a1a1a1a1a1a1 }
+    volumes: [mock_olt_1:/data]
+    networks:
+      oltnet: { ipv4_address: 172.30.0.11 }
+
+  mock-olt-2:
+    <<: *mock-olt
+    # Initial engine ID = MOCK_OLTS in packages/shared/src/mock-credentials.ts (seed-mock pins it).
+    environment: { MOCK_INSTANCE: mock-2, MOCK_ENGINE_ID: 80000f3e05a2a2a2a2a2a2 }
+    volumes: [mock_olt_2:/data]
+    networks:
+      oltnet: { ipv4_address: 172.30.0.12 }
+
+  mock-olt-3:
+    <<: *mock-olt
+    # Initial engine ID = MOCK_OLTS in packages/shared/src/mock-credentials.ts (seed-mock pins it).
+    environment: { MOCK_INSTANCE: mock-3, MOCK_ENGINE_ID: 80000f3e05a3a3a3a3a3a3 }
+    volumes: [mock_olt_3:/data]
+    networks:
+      oltnet: { ipv4_address: 172.30.0.13 }
+
+  # dev only: mock-olt-1 SNMP/SSH on the host loopback (127.0.0.1:1161/udp, 127.0.0.1:2222)
+  # for snmpwalk / ssh / ssh-keyscan from the laptop. mock-olt-1 itself publishes nothing.
+  mock-olt-1-ports:
+    <<: *hardening
+    user: "1000:1000"
+    build: { context: ., dockerfile: apps/mock-olt/Dockerfile }
+    image: olt-man/mock-olt:dev
+    profiles: [dev]
+    command: ["node", "dist/bin/forward.js", "udp:1161:172.30.0.11:161", "tcp:2222:172.30.0.11:22"]
+    healthcheck: { disable: true }
+    tmpfs: [/tmp]
+    ports:
+      - "127.0.0.1:1161:1161/udp"
+      - "127.0.0.1:2222:2222"
+    networks: [oltnet]
+    depends_on:
+      mock-olt-1: { condition: service_healthy }
+
+networks:
+  # Public-facing: caddy <-> api.
+  edge: {}
+  # No external access: databases and app services only.
+  internal:
+    internal: true
+  # Worker <-> OLTs (mock-olt instances get static IPs here in B4); also the worker's egress.
+  oltnet:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+# Generated with `pnpm keys:generate` (gitignored secrets/). On the VPS: created there (J2).
+secrets:
+  olt_cred_key:
+    file: ./secrets/olt-cred.key
+  olt_cred_pub:
+    file: ./secrets/olt-cred.pub
+
+volumes:
+  caddy_data: {}
+  caddy_config: {}
+  postgres_data: {}
+  redis_data: {}
+  mock_olt_1: {}
+  mock_olt_2: {}
+  mock_olt_3: {}

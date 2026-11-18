@@ -1,0 +1,197 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens and utilities ported from the fiber-signal-command prototype (light theme only).
+ * Fonts are self-hosted and imported in src/main.tsx: the CSP allows font-src 'self' only, and
+ * no <style> element may be injected at runtime (style-src 'self').
+ */
+
+@theme inline {
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-orange: var(--orange);
+  --color-orange-soft: var(--orange-soft);
+  --color-critical: var(--critical);
+  --color-critical-soft: var(--critical-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-segment-empty: var(--segment-empty);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+
+  --shadow-panel: var(--panel-shadow);
+  --shadow-lift: var(--lift-shadow);
+
+  --animate-pulse-dot: pulse-dot 1.8s ease-in-out infinite;
+}
+
+:root {
+  --radius: 0.75rem;
+
+  /* Neutral canvas: cool grey with a faint violet cast */
+  --background: oklch(0.974 0.003 286);
+  --foreground: oklch(0.2 0.012 286);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.012 286);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.012 286);
+
+  /* Signature accent: electric violet */
+  --primary: oklch(0.53 0.215 289);
+  --primary-foreground: oklch(0.99 0.005 289);
+  --primary-soft: oklch(0.95 0.032 292);
+
+  --secondary: oklch(0.955 0.004 286);
+  --secondary-foreground: oklch(0.25 0.012 286);
+  --muted: oklch(0.955 0.004 286);
+  --muted-foreground: oklch(0.52 0.014 286);
+  --accent: oklch(0.95 0.006 286);
+  --accent-foreground: oklch(0.2 0.012 286);
+  --destructive: oklch(0.6 0.205 25);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  /* Network status palette */
+  --success: oklch(0.62 0.15 156);
+  --success-soft: oklch(0.955 0.04 156);
+  --warning: oklch(0.79 0.16 82);
+  --warning-soft: oklch(0.965 0.05 90);
+  --orange: oklch(0.7 0.18 50);
+  --orange-soft: oklch(0.96 0.04 55);
+  --critical: oklch(0.6 0.205 25);
+  --critical-soft: oklch(0.96 0.03 25);
+  --info: oklch(0.6 0.14 250);
+  --info-soft: oklch(0.955 0.03 250);
+  --segment-empty: oklch(0.9 0.004 286);
+
+  --border: oklch(0.915 0.005 286);
+  --input: oklch(0.905 0.006 286);
+  --ring: oklch(0.53 0.215 289 / 45%);
+
+  --sidebar: oklch(0.99 0.002 286);
+  --sidebar-foreground: oklch(0.32 0.012 286);
+  --sidebar-accent: oklch(0.95 0.005 286);
+  --sidebar-accent-foreground: oklch(0.18 0.012 286);
+  --sidebar-border: oklch(0.915 0.005 286);
+
+  --panel-shadow: 0 1px 2px oklch(0.2 0.02 286 / 4%), 0 1px 0 oklch(0.2 0.02 286 / 2%);
+  --lift-shadow: 0 10px 30px -12px oklch(0.3 0.06 289 / 18%), 0 2px 6px -2px oklch(0.2 0.02 286 / 6%);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: 'ss01', 'cv11';
+  }
+
+  button:not(:disabled),
+  [role='tab']:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+}
+
+/* White surface card used across the app */
+@utility panel {
+  background-color: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-panel);
+}
+
+@utility panel-interactive {
+  transition:
+    box-shadow 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+  &:hover {
+    box-shadow: var(--shadow-lift);
+    border-color: color-mix(in oklab, var(--color-primary) 18%, var(--color-border));
+  }
+}
+
+@utility divider-dashed {
+  border-top: 1px dashed color-mix(in oklab, var(--color-muted-foreground) 35%, transparent);
+}
+
+/* Small monospace chip, e.g. "C320 V2.1" */
+@utility tag-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  padding: 4px 6px;
+  border-radius: 5px;
+  background-color: var(--color-muted);
+  color: var(--color-secondary-foreground);
+  border: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+@utility section-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+}
+
+@utility numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.85);
+  }
+}

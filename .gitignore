@@ -1,0 +1,47 @@
+# Dependencies and build output (rebuilt by `pnpm install` / `pnpm -r build` / Docker)
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Environment and secrets: never committed (CLAUDE.md rule 5)
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+# Plaintext production secrets before sops encryption (runbook J2); only env.sops.yaml may be committed
+deploy/env.yaml
+
+# Mock OLT stays on the dev laptop: not in git, not on the production server.
+# Only its package.json is committed, because pnpm-lock.yaml records the mock-olt importer and
+# `pnpm install --frozen-lockfile` (Dockerfiles, CI) fails when that manifest is missing.
+apps/mock-olt/*
+!apps/mock-olt/package.json
+
+# Project documents (briefs, manual, runbooks) stay on the dev laptop; nothing in the build reads them
+/docs/
+
+# Test output
+apps/ui/test-results/
+apps/ui/playwright-report/
+blob-report/
+/osv/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*~
+
+# Claude Code local settings
+.claude/settings.local.json

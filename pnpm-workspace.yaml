@@ -1,0 +1,25 @@
+packages:
+  - packages/*
+  - apps/*
+
+# Only install package versions published at least 7 days ago (minutes).
+minimumReleaseAge: 10080
+engineStrict: false
+
+allowBuilds:
+  '@swc/core': true
+  # ssh2 works without its optional native crypto/cpu-features addons.
+  ssh2: false
+  cpu-features: false
+  # esbuild ships its binary as a platform package; the postinstall only re-checks it.
+  esbuild: false
+  # Prisma downloads its schema engine (migrations) in postinstall.
+  prisma: true
+  '@prisma/engines': true
+  protobufjs: false
+  # BullMQ's msgpackr falls back to pure JS without this optional native addon.
+  msgpackr-extract: false
+patchedDependencies:
+  net-snmp@3.29.2: patches/net-snmp@3.29.2.patch
+# The net-snmp patch only applies to mock-olt; `pnpm deploy` of api/worker must not fail on it.
+allowUnusedPatches: true

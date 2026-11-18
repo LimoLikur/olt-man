@@ -1,0 +1,4 @@
+# sops creation rule (J2): replace the recipient with the VPS's age public key.
+creation_rules:
+  - path_regex: deploy/env\.sops\.yaml$
+    age: age1replace_with_the_vps_public_key_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx

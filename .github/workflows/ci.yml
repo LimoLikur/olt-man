@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+
+  # Supply chain (SPEC §9): known vulnerabilities in the lockfile. Accepted exceptions live in
+  # osv-scanner.toml with a reason.
+  osv:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm 12 writes a multi-document lockfile; OSV-Scanner only reads the first document
+      # (config deps, ~15 packages). Scan the main document instead.
+      - run: mkdir -p osv && awk 'BEGIN{d=0} /^---$/{d++; next} d==2' pnpm-lock.yaml > osv/pnpm-lock.yaml && test "$(grep -c '^  ' osv/pnpm-lock.yaml)" -gt 100
+      - uses: google/osv-scanner-action/osv-scanner-action@v2.2.2
+        with:
+          scan-args: |-
+            --config=osv-scanner.toml
+            --lockfile=osv/pnpm-lock.yaml

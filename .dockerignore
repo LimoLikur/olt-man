@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/coverage
+.git
+.github
+.env
+.env.*
+!.env.example
+secrets
+deploy/env.yaml
+deploy/env.sops.yaml
+docs
+**/test-results
+**/playwright-report

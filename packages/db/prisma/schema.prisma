@@ -1,0 +1,507 @@
+// Data model: technical brief + SPEC §7. Integrity rules Prisma cannot express (partial
+// unique indexes, immutable olt.is_mock, append-only audit_log for role `app`) live in the
+// SQL migration 0002_integrity.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------- auth
+
+enum Role {
+  admin
+  noc
+  teknisi
+}
+
+model User {
+  id                Int       @id @default(autoincrement())
+  username          String    @unique @db.VarChar(64)
+  passwordHash      String    @map("password_hash")
+  role              Role
+  active            Boolean   @default(true)
+  passwordChangedAt DateTime  @default(now()) @map("password_changed_at") @db.Timestamptz(3)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  sessions          Session[]
+
+  @@map("user")
+}
+
+model Session {
+  /// sha256 of the session ID; the ID itself only lives in the cookie.
+  idHash     String    @id @map("id_hash") @db.Char(64)
+  userId     Int       @map("user_id")
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ip         String    @db.Inet
+  userAgent  String?   @map("user_agent") @db.VarChar(512)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("session")
+}
+
+// ---------------------------------------------------------------------------- OLT
+
+enum OltStatus {
+  pending_pin
+  ok
+  stale
+  unreachable
+  quarantined
+  disabled
+}
+
+enum SnmpVersion {
+  v3
+  v2c
+}
+
+enum MgmtPath {
+  inband
+  outband
+  unknown
+}
+
+model Olt {
+  id              Int         @id @default(autoincrement())
+  name            String      @unique @db.VarChar(64)
+  mgmtIp          String      @map("mgmt_ip") @db.Inet
+  /// Immutable after insert (trigger in 0002_integrity).
+  isMock          Boolean     @map("is_mock")
+  oidProfile      String      @map("oid_profile") @db.VarChar(32)
+  firmware        String?     @db.VarChar(128)
+  mgmtPath        MgmtPath    @default(unknown) @map("mgmt_path")
+  snmpVersion     SnmpVersion @map("snmp_version")
+  /// Envelope-encrypted (AES-256-GCM + RSA-OAEP); only the worker can decrypt.
+  snmpCredEnc     Bytes       @map("snmp_cred_enc")
+  cliEnabled      Boolean     @default(false) @map("cli_enabled")
+  cliCredEnc      Bytes?      @map("cli_cred_enc")
+  /// Legacy SSH algorithms appended to ssh2's defaults (allowlist: sshAlgorithmsSchema in @olt/shared).
+  sshAlgorithms   Json        @default("{}") @map("ssh_algorithms")
+  status          OltStatus   @default(pending_pin)
+  statusIntervalS Int         @default(60) @map("status_interval_s")
+  alarmSettings   Json        @default("{}") @map("alarm_settings")
+  lastPollOkAt    DateTime?   @map("last_poll_ok_at") @db.Timestamptz(3)
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  identities         OltIdentity[]
+  maintenanceWindows MaintenanceWindow[]
+  ponPorts           PonPort[]
+  onus               Onu[]
+  pollRuns           PollRun[]
+  alarms             Alarm[]
+  securityEvents     SecurityEvent[]
+  jobs               Job[]
+  allowlist          ProvisionAllowlist[]
+  metrics            OltMetric[]
+
+  @@map("olt")
+}
+
+enum IdentityKind {
+  ssh_hostkey
+  snmp_engine_id
+  snmp_sysinfo
+}
+
+enum IdentityStatus {
+  candidate
+  pinned
+  retired
+}
+
+model OltIdentity {
+  id        Int            @id @default(autoincrement())
+  oltId     Int            @map("olt_id")
+  olt       Olt            @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  kind      IdentityKind
+  /// sha256 fingerprint, engine ID hex, or "sysName|sysObjectID".
+  value     String         @db.VarChar(512)
+  algo      String?        @db.VarChar(32)
+  /// e.g. "kartu kontrol slot 3"
+  label     String?        @db.VarChar(64)
+  status    IdentityStatus @default(candidate)
+  reason    String?        @db.VarChar(512)
+  pinnedBy  Int?           @map("pinned_by")
+  pinnedAt  DateTime?      @map("pinned_at") @db.Timestamptz(3)
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([oltId, kind, status])
+  @@map("olt_identity")
+}
+
+model MaintenanceWindow {
+  id        Int      @id @default(autoincrement())
+  oltId     Int      @map("olt_id")
+  olt       Olt      @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  startsAt  DateTime @map("starts_at") @db.Timestamptz(3)
+  endsAt    DateTime @map("ends_at") @db.Timestamptz(3)
+  reason    String   @db.VarChar(512)
+  createdBy Int      @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([oltId, startsAt])
+  @@map("maintenance_window")
+}
+
+model PonPort {
+  id     Int     @id @default(autoincrement())
+  oltId  Int     @map("olt_id")
+  olt    Olt     @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  slot   Int     @db.SmallInt
+  port   Int     @db.SmallInt
+  onus   Onu[]
+  alarms Alarm[]
+
+  @@unique([oltId, slot, port])
+  @@map("pon_port")
+}
+
+// ---------------------------------------------------------------------------- ONU
+
+model Onu {
+  id          Int       @id @default(autoincrement())
+  oltId       Int       @map("olt_id")
+  olt         Olt       @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  ponPortId   Int       @map("pon_port_id")
+  ponPort     PonPort   @relation(fields: [ponPortId], references: [id], onDelete: Cascade)
+  /// ONU ID on the port (1-128).
+  onuIndex    Int       @map("onu_index") @db.SmallInt
+  sn          String    @db.VarChar(16)
+  type        String?   @db.VarChar(32)
+  name        String?   @db.VarChar(64)
+  description String?   @db.VarChar(128)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  /// Customer changed (name changed): row kept for history, a new row takes the position.
+  archivedAt  DateTime? @map("archived_at") @db.Timestamptz(3)
+  /// ONU disappeared from the OLT.
+  removedAt   DateTime? @map("removed_at") @db.Timestamptz(3)
+
+  state   OnuState?
+  metrics OnuMetric[]
+  hourly  OnuMetricHourly[]
+  traffic OnuTraffic[]
+  events  OnuEvent[]
+  alarms  Alarm[]
+
+  // (olt, port, index) is unique among active rows only: partial unique index in 0002_integrity.
+  // SN is not unique: a real OLT can list one SN at two positions (0004_onu_sn_not_unique).
+  @@index([oltId, ponPortId, onuIndex])
+  @@index([oltId, sn])
+  @@map("onu")
+}
+
+model OnuState {
+  onuId        Int       @id @map("onu_id")
+  onu          Onu       @relation(fields: [onuId], references: [id], onDelete: Cascade)
+  phaseState   String    @map("phase_state") @db.VarChar(16)
+  adminState   String?   @map("admin_state") @db.VarChar(16)
+  omccState    String?   @map("omcc_state") @db.VarChar(16)
+  rxDbm        Decimal?  @map("rx_dbm") @db.Decimal(6, 3)
+  oltRxDbm     Decimal?  @map("olt_rx_dbm") @db.Decimal(6, 3)
+  lastChangeAt DateTime? @map("last_change_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@map("onu_state")
+}
+
+model OnuMetric {
+  id       BigInt   @id @default(autoincrement())
+  onuId    Int      @map("onu_id")
+  onu      Onu      @relation(fields: [onuId], references: [id], onDelete: Cascade)
+  ts       DateTime @db.Timestamptz(3)
+  rxDbm    Decimal? @map("rx_dbm") @db.Decimal(6, 3)
+  oltRxDbm Decimal? @map("olt_rx_dbm") @db.Decimal(6, 3)
+
+  @@index([onuId, ts(sort: Desc)], map: "onu_metric_onu_id_ts_desc_idx")
+  @@map("onu_metric")
+}
+
+/// Filled after the demo (SPEC §3).
+model OnuMetricHourly {
+  onuId       Int      @map("onu_id")
+  onu         Onu      @relation(fields: [onuId], references: [id], onDelete: Cascade)
+  hour        DateTime @db.Timestamptz(3)
+  rxAvgDbm    Decimal? @map("rx_avg_dbm") @db.Decimal(6, 3)
+  rxMinDbm    Decimal? @map("rx_min_dbm") @db.Decimal(6, 3)
+  rxMaxDbm    Decimal? @map("rx_max_dbm") @db.Decimal(6, 3)
+  oltRxAvgDbm Decimal? @map("olt_rx_avg_dbm") @db.Decimal(6, 3)
+  samples     Int
+
+  @@id([onuId, hour])
+  @@map("onu_metric_hourly")
+}
+
+/// Filled after the demo (SPEC §3).
+model OnuTraffic {
+  id        BigInt   @id @default(autoincrement())
+  onuId     Int      @map("onu_id")
+  onu       Onu      @relation(fields: [onuId], references: [id], onDelete: Cascade)
+  ts        DateTime @db.Timestamptz(3)
+  inBps     BigInt?  @map("in_bps")
+  outBps    BigInt?  @map("out_bps")
+  inPps     BigInt?  @map("in_pps")
+  outPps    BigInt?  @map("out_pps")
+  source    String   @db.VarChar(8)
+
+  @@index([onuId, ts])
+  @@map("onu_traffic")
+}
+
+/// Filled after the demo (SPEC §3).
+model OltMetric {
+  id     BigInt   @id @default(autoincrement())
+  oltId  Int      @map("olt_id")
+  olt    Olt      @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  ts     DateTime @db.Timestamptz(3)
+  metric String   @db.VarChar(64)
+  value  Float
+
+  @@index([oltId, metric, ts])
+  @@map("olt_metric")
+}
+
+enum OnuEventKind {
+  state_change
+  device_replaced
+  archived
+  removed
+}
+
+model OnuEvent {
+  id               BigInt       @id @default(autoincrement())
+  onuId            Int          @map("onu_id")
+  onu              Onu          @relation(fields: [onuId], references: [id], onDelete: Cascade)
+  /// Observation time of the worker, not the OLT clock.
+  ts               DateTime     @db.Timestamptz(3)
+  kind             OnuEventKind
+  fromState        String?      @map("from_state") @db.VarChar(16)
+  toState          String?      @map("to_state") @db.VarChar(16)
+  cause            String?      @db.VarChar(32)
+  observedAfterGap Boolean      @default(false) @map("observed_after_gap")
+  detail           Json?
+
+  @@index([onuId, ts])
+  @@map("onu_event")
+}
+
+enum PollKind {
+  status
+  optical
+  inventory
+  metrics
+  traffic
+}
+
+model PollRun {
+  id         BigInt    @id @default(autoincrement())
+  oltId      Int       @map("olt_id")
+  olt        Olt       @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  kind       PollKind
+  startedAt  DateTime  @map("started_at") @db.Timestamptz(3)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(3)
+  ok         Boolean?
+  error      String?   @db.VarChar(512)
+
+  @@index([oltId, kind, startedAt])
+  @@map("poll_run")
+}
+
+// ---------------------------------------------------------------------------- alarms
+
+enum AlarmKind {
+  onu_los
+  onu_flapping
+  onu_rx_low
+  pon_mass_los
+  pon_mass_power
+  olt_unreachable
+  olt_identity_mismatch
+  cli_unavailable
+}
+
+enum AlarmSeverity {
+  info
+  warning
+  critical
+}
+
+enum AlarmState {
+  active
+  cleared
+}
+
+model Alarm {
+  id            Int           @id @default(autoincrement())
+  oltId         Int           @map("olt_id")
+  olt           Olt           @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  ponPortId     Int?          @map("pon_port_id")
+  ponPort       PonPort?      @relation(fields: [ponPortId], references: [id], onDelete: SetNull)
+  onuId         Int?          @map("onu_id")
+  onu           Onu?          @relation(fields: [onuId], references: [id], onDelete: SetNull)
+  kind          AlarmKind
+  /// Rule key, e.g. "pon_mass_los:port:1/1" (alarm engine, E6).
+  key           String        @db.VarChar(64)
+  severity      AlarmSeverity
+  state         AlarmState    @default(active)
+  /// Suppression: child alarms point at the alarm that holds them.
+  parentAlarmId Int?          @map("parent_alarm_id")
+  parent        Alarm?        @relation("AlarmParent", fields: [parentAlarmId], references: [id], onDelete: SetNull)
+  children      Alarm[]       @relation("AlarmParent")
+  firstAt       DateTime      @map("first_at") @db.Timestamptz(3)
+  lastAt        DateTime      @map("last_at") @db.Timestamptz(3)
+  count         Int           @default(1)
+  detail        Json?
+  ackBy         Int?          @map("ack_by")
+  ackAt         DateTime?     @map("ack_at") @db.Timestamptz(3)
+  clearedAt     DateTime?     @map("cleared_at") @db.Timestamptz(3)
+
+  @@index([oltId, state])
+  @@index([oltId, key, state])
+  @@index([parentAlarmId])
+  @@map("alarm")
+}
+
+enum NotificationStatus {
+  pending
+  /// Claimed by the outbox; left over after a crash it becomes failed, never resent.
+  sending
+  sent
+  failed
+}
+
+/// Telegram outbox.
+model Notification {
+  id        BigInt             @id @default(autoincrement())
+  dedupeKey String             @unique @map("dedupe_key") @db.VarChar(200)
+  payload   Json
+  status    NotificationStatus @default(pending)
+  attempts  Int                @default(0)
+  createdAt DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  sentAt    DateTime?          @map("sent_at") @db.Timestamptz(3)
+  lastError String?            @map("last_error") @db.VarChar(512)
+
+  @@index([status, createdAt])
+  @@map("notification")
+}
+
+enum SecurityEventKind {
+  identity_mismatch
+  arp_change
+  snmp_auth_failure
+  cli_auth_failed
+  admin_offlan_denied
+  write_guard_denied
+  trap_unknown_source
+}
+
+model SecurityEvent {
+  id             Int               @id @default(autoincrement())
+  oltId          Int?              @map("olt_id")
+  olt            Olt?              @relation(fields: [oltId], references: [id], onDelete: SetNull)
+  kind           SecurityEventKind
+  severity       AlarmSeverity
+  detail         Json
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  acknowledgedBy Int?              @map("acknowledged_by")
+
+  @@index([oltId, createdAt])
+  @@map("security_event")
+}
+
+// ---------------------------------------------------------------------------- jobs
+
+enum JobKind {
+  identity_probe
+  onu_detail
+  port_sweep
+  onu_register
+  config_save
+  /// Reads the OLT's VLANs and T-CONT profiles into provision_allowlist (read-only, 2026-11-13).
+  list_sync
+  /// Reads `show gpon onu uncfg`: unregistered ONUs for the registration page (read-only, 2026-11-13).
+  uncfg_scan
+}
+
+enum JobStatus {
+  draft
+  preview
+  /// Submitted by a teknisi; waits for NOC/admin approval.
+  pending_approval
+  confirmed
+  running
+  verifying
+  succeeded
+  failed
+  blocked
+  cancelled
+  /// Refused by NOC/admin; the reason is in result.rejectReason.
+  rejected
+}
+
+model Job {
+  id              Int       @id @default(autoincrement())
+  oltId           Int       @map("olt_id")
+  olt             Olt       @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  kind            JobKind
+  params          Json
+  preview         String?
+  previewSha256   String?   @map("preview_sha256") @db.Char(64)
+  status          JobStatus
+  requestedBy     Int?      @map("requested_by")
+  confirmedBy     Int?      @map("confirmed_by")
+  /// Redacted transcript and outcome.
+  result          Json?
+  appliedCommands Json?     @map("applied_commands")
+  beforeSnapshot  Json?     @map("before_snapshot")
+  afterSnapshot   Json?     @map("after_snapshot")
+  savedByJobId    Int?      @map("saved_by_job_id")
+  savedBy         Job?      @relation("SavedBy", fields: [savedByJobId], references: [id], onDelete: SetNull)
+  saves           Job[]     @relation("SavedBy")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([oltId, status])
+  @@map("job")
+}
+
+enum AllowlistKind {
+  onu_type
+  tcont_profile
+  vlan
+}
+
+model ProvisionAllowlist {
+  id    Int           @id @default(autoincrement())
+  oltId Int           @map("olt_id")
+  olt   Olt           @relation(fields: [oltId], references: [id], onDelete: Cascade)
+  kind  AllowlistKind
+  value String        @db.VarChar(32)
+
+  @@unique([oltId, kind, value])
+  @@map("provision_allowlist")
+}
+
+/// Append-only: role `app` has no UPDATE/DELETE (0002_integrity).
+model AuditLog {
+  id     BigInt   @id @default(autoincrement())
+  ts     DateTime @default(now()) @db.Timestamptz(3)
+  actor  Int?
+  action String   @db.VarChar(64)
+  target String?  @db.VarChar(128)
+  detail Json?
+  ip     String?  @db.Inet
+
+  @@index([ts])
+  @@map("audit_log")
+}
