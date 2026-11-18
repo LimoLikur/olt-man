@@ -8,7 +8,7 @@
   },
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "pnpm -r --parallel typecheck && tsc -p tsconfig.json",
+    "typecheck": "pnpm --filter @olt/db generate && pnpm -r --parallel typecheck && tsc -p tsconfig.json",
     "test": "vitest run",
     "test:int": "pnpm --filter @olt/db generate && vitest run --mode int",
     "e2e": "pnpm --filter ui e2e",

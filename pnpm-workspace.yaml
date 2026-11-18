@@ -23,3 +23,6 @@ patchedDependencies:
   net-snmp@3.29.2: patches/net-snmp@3.29.2.patch
 # The net-snmp patch only applies to mock-olt; `pnpm deploy` of api/worker must not fail on it.
 allowUnusedPatches: true
+overrides:
+  # @nestjs/platform-express pins multer 2.4.0 exactly; 2.5.0 fixes GHSA-q7qp-rjg7-q26m.
+  multer: 2.5.0

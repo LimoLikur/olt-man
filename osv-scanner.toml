@@ -1,38 +1,16 @@
 # Accepted OSV findings, each with a reason and an expiry (PLAN J1). When ignoreUntil passes, CI
 # fails again: update the package then (pnpm minimumReleaseAge = 7 days, CLAUDE.md).
-# Decision 26 Okt 2026 (pemilik repo): keep the 7-day rule; patch after the demo.
+# 19 Nov 2026: body-parser 2.4.0, multer 2.5.0 (override) and fast-uri 3.1.9 updated; their
+# earlier exceptions removed.
 
-# body-parser 2.3.0 -> 2.4.0 (released 22 Oct, eligible 29 Oct). Reaches the internet-facing api
-# (express JSON body parsing). Risk accepted for the demo window.
+# glob 10.5.0 / minimatch 5.1.9, 9.0.9: dev-only (testcontainers -> archiver), not in runtime
+# images. Fixes are majors (glob 14, minimatch 11) that archiver 7 does not support.
 [[IgnoredVulns]]
-id = "GHSA-27r3-jxmh-p828"
-ignoreUntil = 2026-10-30T00:00:00Z
-reason = "DoS via trailing bytes; fix 2.4.0 younger than minimumReleaseAge until 29 Oct. Accepted for the demo; update on 29 Oct."
-
-# multer 2.4.0 -> 2.5.0 (released 22 Oct). Pulled in by @nestjs/platform-express; the api has no
-# multipart/upload endpoint, so the vulnerable path is not reachable.
-[[IgnoredVulns]]
-id = "GHSA-q7qp-rjg7-q26m"
-ignoreUntil = 2026-10-30T00:00:00Z
-reason = "DoS via pending file upload; no upload route uses multer. Fix 2.5.0 eligible 29 Oct."
-
-# fast-uri 3.1.8 -> 3.1.9: dev-only (prisma CLI -> @prisma/dev -> ajv), not in runtime images.
-[[IgnoredVulns]]
-id = "GHSA-333x-w4r6-6crp"
-ignoreUntil = 2026-10-30T00:00:00Z
-reason = "Dev dependency of the Prisma CLI only; not shipped. Fix 3.1.9 eligible 26 Oct 23:05 UTC."
+id = "GHSA-3g3m-2fjr-6pw4"
+ignoreUntil = 2027-01-31T00:00:00Z
+reason = "glob via testcontainers/archiver, integration tests only; fix needs glob 14 (major). Recheck when testcontainers updates archiver."
 
 [[IgnoredVulns]]
-id = "GHSA-w74x-v6f9-j3xg"
-ignoreUntil = 2026-10-30T00:00:00Z
-reason = "Dev dependency of the Prisma CLI only; not shipped. Fix 3.1.9 eligible 26 Oct 23:05 UTC."
-
-[[IgnoredVulns]]
-id = "GHSA-wjr9-j795-jxcr"
-ignoreUntil = 2026-10-30T00:00:00Z
-reason = "Dev dependency of the Prisma CLI only; not shipped. Fix 3.1.9 eligible 26 Oct 23:05 UTC."
-
-[[IgnoredVulns]]
-id = "GHSA-xhq7-xmqj-769h"
-ignoreUntil = 2026-10-30T00:00:00Z
-reason = "Dev dependency of the Prisma CLI only; not shipped. Fix 3.1.9 eligible 26 Oct 23:05 UTC."
+id = "GHSA-g3hv-75wg-m249"
+ignoreUntil = 2027-01-31T00:00:00Z
+reason = "minimatch via testcontainers/archiver, integration tests only; fix needs minimatch 11 (major). Recheck when testcontainers updates archiver."
