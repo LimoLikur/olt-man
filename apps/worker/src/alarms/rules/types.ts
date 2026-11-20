@@ -1,6 +1,6 @@
 import type { PhaseState } from '@olt/olt-spec';
 
-export type AlarmKind = 'onu_los' | 'onu_flapping' | 'onu_rx_low' | 'pon_mass_los' | 'pon_mass_power' | 'olt_unreachable';
+export type AlarmKind = 'onu_los' | 'onu_dying_gasp' | 'onu_flapping' | 'onu_rx_low' | 'pon_mass_los' | 'pon_mass_power' | 'olt_unreachable';
 export type Severity = 'info' | 'warning' | 'critical';
 
 export interface Transition {
@@ -51,6 +51,7 @@ export interface DesiredAlarm {
 
 export const keys = {
   onuLos: (onuId: number) => `onu_los:onu:${onuId}`,
+  dyingGasp: (onuId: number) => `onu_dying_gasp:onu:${onuId}`,
   flapping: (onuId: number) => `onu_flapping:onu:${onuId}`,
   rxLow: (onuId: number) => `onu_rx_low:onu:${onuId}`,
   massLos: (port: string) => `pon_mass_los:port:${port}`,

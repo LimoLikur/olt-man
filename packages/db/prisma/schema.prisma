@@ -321,6 +321,7 @@ model PollRun {
 
 enum AlarmKind {
   onu_los
+  onu_dying_gasp
   onu_flapping
   onu_rx_low
   pon_mass_los

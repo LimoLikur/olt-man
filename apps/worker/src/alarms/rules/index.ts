@@ -1,3 +1,4 @@
+import { onuDyingGasp } from './onu-dying-gasp.js';
 import { onuFlapping } from './onu-flapping.js';
 import { onuLos } from './onu-los.js';
 import { onuRxLow } from './onu-rx-low.js';
@@ -11,7 +12,7 @@ export * from './types.js';
 
 /**
  * All §8.2 rules for one OLT, plus suppression: a held alarm is still returned, with
- * parentKey pointing at the alarm holding it (OLT unreachable > mass > flapping > onu_los).
+ * parentKey pointing at the alarm holding it (OLT unreachable > mass > flapping > onu_los / onu_dying_gasp).
  */
 export function evaluate(snap: Snapshot, s: AlarmSettings): DesiredAlarm[] {
   const unreachable = oltUnreachable(snap.oltTimeouts, s);
@@ -21,12 +22,14 @@ export function evaluate(snap: Snapshot, s: AlarmSettings): DesiredAlarm[] {
     return [...unreachable, ...held];
   }
 
-  const mass = ponMass(snap.onus, snap.active, snap.now, s);
+  const mass = ponMass(snap.onus, s);
   const flapping = onuFlapping(snap.onus, snap.active, snap.now, s);
   const los = onuLos(snap.onus);
+  const gasp = onuDyingGasp(snap.onus);
   const rx = onuRxLow(snap.onus, snap.active, s);
 
   const massByPort = new Map(mass.filter((m) => m.kind === 'pon_mass_los').map((m) => [m.port!, m.key]));
+  const powerByPort = new Map(mass.filter((m) => m.kind === 'pon_mass_power').map((m) => [m.port!, m.key]));
   const flapByOnu = new Map(flapping.map((f) => [f.onuId!, f.key]));
   for (const f of flapping) {
     const parent = massByPort.get(f.port!);
@@ -36,5 +39,9 @@ export function evaluate(snap: Snapshot, s: AlarmSettings): DesiredAlarm[] {
     const parent = massByPort.get(l.port!) ?? flapByOnu.get(l.onuId!);
     if (parent) l.parentKey = parent;
   }
-  return [...mass, ...flapping, ...los, ...rx];
+  for (const g of gasp) {
+    const parent = powerByPort.get(g.port!);
+    if (parent) g.parentKey = parent;
+  }
+  return [...mass, ...flapping, ...los, ...gasp, ...rx];
 }

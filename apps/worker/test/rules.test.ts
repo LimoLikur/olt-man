@@ -30,15 +30,20 @@ describe('pon_mass_los', () => {
     expect(children.every((c) => c.parentKey === keys.massLos('1/1') && !c.notify)).toBe(true);
   });
 
-  it('4 LOS spread over 3 minutes -> not mass', () => {
+  it('ONUs already LOS before polling started count too (current state, no window)', () => {
     const onus = port(12);
-    let next = 0;
-    for (let t = T0; t <= T0 + 3 * MIN; t += 10_000) {
-      while (next < 4 && T0 + next * MIN <= t) go(onus[next]!, 'los', T0 + next++ * MIN);
-      expect(kinds(evaluate(snap(onus, t), S), 'pon_mass_los')).toHaveLength(0);
-    }
-    expect(onus.filter((o) => o.phase === 'los')).toHaveLength(4);
-    expect(kinds(evaluate(snap(onus, T0 + 3 * MIN), S), 'onu_los').every((a) => a.parentKey === undefined)).toBe(true);
+    onus.slice(0, 4).forEach((o) => (o.phase = 'los')); // no transitions in the window
+    const out = evaluate(snap(onus, T0), S);
+    expect(kinds(out, 'pon_mass_los')).toHaveLength(1);
+    expect(kinds(out, 'onu_los').every((a) => a.parentKey === keys.massLos('1/1'))).toBe(true);
+  });
+
+  it('3 LOS on a big port -> not mass, plain onu_los', () => {
+    const onus = port(12);
+    onus.slice(0, 3).forEach((o, i) => go(o, 'los', T0 + i * MIN));
+    const out = evaluate(snap(onus, T0 + 3 * MIN), S);
+    expect(kinds(out, 'pon_mass_los')).toHaveLength(0);
+    expect(kinds(out, 'onu_los').every((a) => a.parentKey === undefined)).toBe(true);
   });
 
   it('port with 2 ONUs: 1 LOS -> not mass, 2 LOS -> mass (§2.2 no. 10)', () => {
@@ -59,12 +64,16 @@ describe('pon_mass_los', () => {
     expect(kinds(evaluate(snap(onus, T0 + 31 * MIN, asActive(out)), S), 'pon_mass_los')).toHaveLength(0);
   });
 
-  it('DyingGasp en masse -> pon_mass_power; a single DyingGasp -> no alarm at all', () => {
+  it('a single DyingGasp -> onu_dying_gasp; en masse -> pon_mass_power holding the ONU alarms', () => {
     const onus = port(12);
     go(onus[0]!, 'dying_gasp', T0);
-    expect(evaluate(snap(onus, T0 + 1000), S)).toEqual([]);
+    expect(evaluate(snap(onus, T0 + 1000), S)).toEqual([expect.objectContaining({ key: keys.dyingGasp(onus[0]!.onuId), kind: 'onu_dying_gasp', notify: false })]);
     onus.slice(1, 5).forEach((o) => go(o, 'dying_gasp', T0 + 2000));
-    expect(kinds(evaluate(snap(onus, T0 + 3000), S), 'pon_mass_power')).toHaveLength(1);
+    const out = evaluate(snap(onus, T0 + 3000), S);
+    expect(kinds(out, 'pon_mass_power')).toHaveLength(1);
+    const children = kinds(out, 'onu_dying_gasp');
+    expect(children).toHaveLength(5);
+    expect(children.every((c) => c.parentKey === keys.massPower('1/1'))).toBe(true);
   });
 });
 

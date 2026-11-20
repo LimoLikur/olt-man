@@ -28,9 +28,9 @@ Dokumen ini menggantikan bagian brief yang bertentangan dengannya; bagian brief 
 | NMS lain | LibreNMS, di server lain | OLT dipolling dua sistem: jadwal diberi offset, uji pertama di jam sepi |
 | Akses UI | Internet tanpa VPN, lewat domain dan port forward 443 | Sertifikat Let's Encrypt lewat `caddy`; kompensasi di §9 |
 | Kompensasi | Sesi pendek; admin hanya dari LAN | Tanpa MFA (risiko diterima, §12) |
-| DyingGasp | Hanya status; alarm hanya bila massal per port | — |
+| DyingGasp | Alarm per ONU (`onu_dying_gasp`); bila massal per port digabung di bawah `pon_mass_power` (diubah 19 Nov 2026) | — |
 | Flapping | ≥3 putus dalam 1 jam; selesai setelah stabil 1 jam | — |
-| LOS massal | ≥4 ONU atau ≥50% ONU port dalam 2 menit | — |
+| LOS massal | ≥4 ONU atau ≥50% ONU port sedang LOS (status saat ini) | — |
 | OLT tak terjangkau | 2 siklus status gagal (±2 menit) | ONU tampil "tidak diketahui", tanpa alarm per ONU |
 | Sesi CLI penuh | Retry 30 detik, 2 menit, 5 menit, lalu gagal; password salah tidak di-retry | — |
 | Ambang Rx | Waspada < −25 dBm, kritis < −27 dBm, histeresis 1 dB | — |
@@ -412,15 +412,17 @@ Retensi: `onu_metric` mentah disimpan 400 hari dan `poll_run` 90 hari; sesi keda
 | Alarm | Pemicu | Selesai | Ditahan saat | Telegram |
 | --- | --- | --- | --- | --- |
 | `onu_los` | Fase ONU berubah ke LOS | Kembali `working` | LOS massal di port, flapping, OLT tak terjangkau, karantina | Tidak |
+| `onu_dying_gasp` | Fase ONU sedang DyingGasp | Keluar dari DyingGasp | DyingGasp massal di port, OLT tak terjangkau, karantina | Tidak |
 | `onu_flapping` | ≥3 kali putus (working ke LOS atau offline; DyingGasp tidak dihitung) dalam 1 jam | 1 jam tanpa putus | OLT tak terjangkau | Ya, saat mulai dan selesai |
 | `onu_rx_low` | Rx sisi ONU < −25 dBm (waspada) atau < −27 dBm (kritis) | Rx naik ≥ 1 dB di atas ambang | OLT tak terjangkau | Tidak |
-| `pon_mass_los` | Dalam 2 menit ≥4 ONU, atau ≥50% ONU port (minimal 2 ONU), menjadi LOS | Jumlah ONU LOS di port turun di bawah ambang | OLT tak terjangkau | Ya, saat mulai dan selesai |
+| `pon_mass_los` | ≥4 ONU, atau ≥50% ONU port (minimal 2 ONU), sedang LOS; dihitung dari status saat ini, termasuk ONU yang sudah LOS sebelum polling dimulai | Jumlah ONU LOS di port turun di bawah ambang | OLT tak terjangkau | Ya, saat mulai dan selesai |
 | `pon_mass_power` | Aturan yang sama untuk DyingGasp, dengan teks "kemungkinan listrik padam" | Sama | OLT tak terjangkau | Ya, saat mulai dan selesai |
 | `olt_unreachable` | 2 siklus status berturut-turut timeout | 1 siklus sukses | Karantina | Ya, saat mulai dan pulih (dengan ringkasan) |
 | `olt_identity_mismatch` | Host key, engine ID, atau sysName/sysObjectID (v2c) berbeda dari pin; atau autentikasi SNMPv3 gagal 2 siklus | Admin menerima perubahan | — | Ya |
 | `cli_unavailable` | Job CLI gagal setelah 3 retry | Job CLI berikutnya sukses | — | Tidak (peringatan rendah) |
 
-- DyingGasp pada satu ONU hanya mengubah status dan riwayat, tanpa alarm.
+- DyingGasp pada satu ONU memicu `onu_dying_gasp` tanpa Telegram (diubah 19 Nov 2026; sebelumnya hanya status).
+- Di UI, kartu ringkasan halaman Alarms: OLT Unreachable, Dying Gasp (`onu_dying_gasp`), Loss (`onu_los`), Low Rx, dan Mass outage (`pon_mass_los` + `pon_mass_power`, ditandai merah).
 - Sumber data putus untuk flapping: transisi dari polling, riwayat detail-info (bila CLI tersedia), dan trap (bila WP5 sudah ada). Ketiganya dideduplikasi dengan toleransi 60 detik.
 - Alarm yang ditahan tetap tercatat sebagai anak (`parent_alarm_id`) dari alarm yang menahannya.
 - Ack oleh NOC atau admin tidak menyelesaikan alarm; alarm selesai otomatis saat kondisinya pulih.
@@ -785,7 +787,7 @@ Skrip `pnpm` dan perintah skenario di bawah dibuat di WP1 dan WP3, lalu dicatat 
 2. Seed admin, login dari LAN, lalu daftarkan `mock-1` sampai `mock-3` (SNMPv3 dan SSH). Kandidat identitas muncul, lalu admin mem-pin.
 3. Dalam 2 menit, dashboard menampilkan ±210 ONU, usia data status < 2 menit, dan Rx sesuai fixture.
 4. `scenario onu-los`: alarm `onu_los` muncul di UI dalam ≤ 2 menit, tanpa pesan Telegram.
-5. `scenario onu-dying-gasp`: status berubah, tanpa alarm.
+5. `scenario onu-dying-gasp`: status berubah dan alarm `onu_dying_gasp` muncul, tanpa pesan Telegram.
 6. `scenario los-mass` (5 ONU di satu port): satu `pon_mass_los` dan satu pesan Telegram, dengan alarm per ONU tergabung di bawahnya. `scenario reset`: alarm selesai dan pesan pulih terkirim.
 7. `scenario dying-gasp-mass`: `pon_mass_power` dengan teks "kemungkinan listrik padam", plus pesan Telegram.
 8. `scenario flap` (3 kali, dengan profil waktu cepat): `onu_flapping` dan pesan Telegram. Setelah ONU stabil, alarm selesai dan pesan selesai terkirim.

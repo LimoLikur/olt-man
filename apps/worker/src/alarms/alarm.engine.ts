@@ -3,7 +3,7 @@ import type { PollerDeps } from '../poller/context.js';
 import { alarmMessage } from './messages.js';
 import { type ActiveAlarm, evaluate, type OnuSnapshot, resolveAlarmSettings, type Transition } from './rules/index.js';
 
-const RULE_KINDS = ['onu_los', 'onu_flapping', 'onu_rx_low', 'pon_mass_los', 'pon_mass_power', 'olt_unreachable'] as const;
+const RULE_KINDS = ['onu_los', 'onu_dying_gasp', 'onu_flapping', 'onu_rx_low', 'pon_mass_los', 'pon_mass_power', 'olt_unreachable'] as const;
 
 export interface AlarmEngineDeps extends Pick<PollerDeps, 'prisma' | 'now'> {
   uiBaseUrl: string;

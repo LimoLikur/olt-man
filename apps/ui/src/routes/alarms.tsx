@@ -51,7 +51,8 @@ export function AlarmsPage() {
 
   const open = active.data ?? [];
   const done = cleared.data ?? [];
-  const bySeverity = (s: string) => open.filter((a) => a.severity === s).length;
+  // Summary cards count open alarms by kind, not by severity.
+  const byKind = (...kinds: string[]) => open.filter((a) => kinds.includes(a.kind)).length;
   const lists: Record<Tab, AlarmTree[]> = {
     active: open,
     unacked: open.filter((a) => !a.ackAt),
@@ -66,11 +67,11 @@ export function AlarmsPage() {
       <PageHeader title="Alarms" subtitle={`${open.length} active · ${open.filter((a) => a.ackAt).length} acknowledged`} />
       <PageBody>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
-          <StatCard title="Critical" icon={OctagonExclamationPoint} tone="critical" value={bySeverity('critical')} chip="open" />
-          <StatCard title="Major" icon={TriangleExclamationPoint} tone="warning" value={<NAValue title="OLT-MAN has no major severity" />} chip="open" />
-          <StatCard title="Minor" icon={CircleExclamationPoint} tone="warning" value={<NAValue title="OLT-MAN has no minor severity" />} chip="open" />
-          <StatCard title="Warning" icon={TriangleExclamationPoint} tone="warning" value={bySeverity('warning')} chip="open" />
-          <StatCard title="Info" icon={Info} tone="info" value={bySeverity('info')} chip="open" />
+          <StatCard title="OLT Unreachable" icon={OctagonExclamationPoint} tone="critical" value={byKind('olt_unreachable')} chip="open" />
+          <StatCard title="Dying Gasp" icon={TriangleExclamationPoint} tone="warning" value={byKind('onu_dying_gasp')} chip="open" />
+          <StatCard title="Loss" icon={CircleExclamationPoint} tone="warning" value={byKind('onu_los')} chip="open" />
+          <StatCard title="Low Rx" icon={TriangleExclamationPoint} tone="warning" value={byKind('onu_rx_low')} chip="open" />
+          <StatCard title="Mass outage" icon={Info} tone="critical" value={<span className="text-critical">{byKind('pon_mass_los', 'pon_mass_power')}</span>} chip="critical" />
         </div>
 
         {!canAck && (

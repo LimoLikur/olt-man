@@ -93,6 +93,7 @@ export const IDENTITY_LABEL = { strong: 'Strong identity', weak: 'Weak identity'
 
 export const ALARM_LABEL: Record<string, string> = {
   onu_los: 'ONU LOS',
+  onu_dying_gasp: 'ONU Dying Gasp',
   onu_flapping: 'ONU flapping',
   onu_rx_low: 'Low Rx',
   pon_mass_los: 'Mass LOS',
@@ -105,10 +106,11 @@ export const ALARM_LABEL: Record<string, string> = {
 /** One line per alarm kind (SPEC §8.2), in place of a per-alarm message the API does not have. */
 export const ALARM_DESCRIPTION: Record<string, string> = {
   onu_los: 'The ONU lost its optical signal.',
+  onu_dying_gasp: 'The ONU sent dying gasp: power at the customer is off.',
   onu_flapping: 'The ONU dropped 3 or more times within an hour.',
   onu_rx_low: 'ONU receive power is below −25 dBm (warning) or −27 dBm (critical).',
-  pon_mass_los: 'Several ONUs on one PON port went LOS within 2 minutes.',
-  pon_mass_power: 'Several ONUs on one PON port sent dying gasp: likely a power outage.',
+  pon_mass_los: 'Several ONUs on one PON port are LOS at the same time.',
+  pon_mass_power: 'Several ONUs on one PON port are in dying gasp at the same time: likely a power outage.',
   olt_unreachable: 'Two status cycles in a row timed out.',
   olt_identity_mismatch: 'The OLT identity differs from the pin; polling and CLI are stopped.',
   cli_unavailable: 'A CLI job failed after 3 retries.',

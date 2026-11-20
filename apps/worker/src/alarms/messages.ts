@@ -24,6 +24,7 @@ export function alarmMessage(m: AlarmMessageInput): string {
     onu_flapping: [`🟡 ONU${onu} di ${where} putus-sambung (flapping).`, `✅ ONU${onu} di ${where} stabil lagi.`],
     olt_unreachable: [`🔴 OLT ${m.olt} tidak terjangkau (2 siklus polling gagal).`, `✅ OLT ${m.olt} terjangkau lagi; ${m.stillOffline ?? 0} ONU masih offline.`],
     onu_los: [`ONU${onu} di ${where} LOS.`, `ONU${onu} di ${where} kembali normal.`],
+    onu_dying_gasp: [`ONU${onu} di ${where} DyingGasp (listrik pelanggan padam).`, `ONU${onu} di ${where} kembali normal.`],
     onu_rx_low: [`Rx ONU${onu} di ${where} rendah.`, `Rx ONU${onu} di ${where} normal.`],
   };
   return `${lines[m.kind][m.phase === 'start' ? 0 : 1]}\n${m.link}`;
