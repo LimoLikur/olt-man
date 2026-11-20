@@ -25,8 +25,11 @@ export interface OltCliSessionOptions {
 
 /** A prompt hostname: visible ASCII ("!" to "~") except "#" and the parentheses around the mode. */
 const HOSTNAME = String.raw`(?:(?![#()])[!-~]){1,64}`;
-/** The CLI mode after the hostname, if any: (config), (config-if), (gpon-onu-mng). */
-const MODE = String.raw`(?:\([A-Za-z0-9_-]{1,32}\))?`;
+/**
+ * The CLI mode after the hostname, if any: (config), (config-if), (gpon-onu-mng 1/2/8:2).
+ * A real C320 (V2.1) adds the ONU index in pon-onu-mng mode; the manual shows (gpon-onu-mng) only.
+ */
+const MODE = String.raw`(?:\([A-Za-z0-9_-]{1,32}(?: [0-9]{1,2}/[0-9]{1,2}/[0-9]{1,2}(?::[0-9]{1,3})?)?\))?`;
 
 /**
  * The first prompt after login, whatever hostname the OLT has: ZXAN#, OLT-ZTE_C320#, OLT-DUD@JGL#,
