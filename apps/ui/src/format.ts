@@ -145,6 +145,7 @@ export const PROVISION_MODE_LABEL: Record<string, string> = {
   bridge: 'Bridge',
   pppoe_map: 'PPPoE MAP',
   bridge_static: 'Bridge Static',
+  pppoe_jgl: 'PPPoE-JGL',
 };
 
 export const JOB_KIND_LABEL: Record<string, string> = {

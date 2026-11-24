@@ -35,9 +35,10 @@ export const pppoePasswordSchema = z.string().regex(/^[A-Za-z0-9._@-]{1,32}$/);
 /**
  * Registration templates (SPEC §8.5): `default` is the manual's internet template, `bridge` the
  * field bridge configuration (2026-11-14), `pppoe_map` the field PPPoE configuration (2026-11-15),
- * `bridge_static` the field static-plus-bridging configuration (2026-11-17).
+ * `bridge_static` the field static-plus-bridging configuration (2026-11-17), `pppoe_jgl` the PPPoE MAP
+ * template on vlan-profile "briding" (2026-11-25).
  */
-export const PROVISION_MODES = ['default', 'bridge', 'pppoe_map', 'bridge_static'] as const;
+export const PROVISION_MODES = ['default', 'bridge', 'pppoe_map', 'bridge_static', 'pppoe_jgl'] as const;
 export type ProvisionMode = (typeof PROVISION_MODES)[number];
 
 export type PonRefInput = z.input<typeof ponRefSchema>;

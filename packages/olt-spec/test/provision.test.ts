@@ -11,6 +11,7 @@ import {
   registerOnuBridge,
   registerOnuBridgeStatic,
   registerOnuInternet,
+  registerOnuPppoeJgl,
   registerOnuPppoeMap,
   renderPreview,
   writeConfig,
@@ -202,6 +203,34 @@ const pppoe = {
   pppoeUsername: 'AUD-03-00001-001',
   pppoePassword: 'rahasia.123',
 };
+
+// PPPoE-JGL (owner decision 2026-11-25): the PPPoE MAP template, vlan-profile "briding".
+describe('registerOnuPppoeJgl (SPEC §8.5, mode pppoe_jgl)', () => {
+  const jgl = { ...pppoe, mode: 'pppoe_jgl' as const, port: 10, onuId: 2, vlan: 1501, pppoeUsername: 'AUD-03-00390-001' };
+
+  it('is PPPoE MAP line for line except the vlan-profile', () => {
+    const map = renderPreview(registerOnuAndSave({ ...jgl, mode: 'pppoe_map' })).split('\n');
+    const got = renderPreview(registerOnuAndSave(jgl)).split('\n');
+    expect(got).toHaveLength(map.length);
+    const diff = got.map((l, i) => [map[i], l]).filter(([a, b]) => a !== b);
+    expect(diff).toEqual([
+      [
+        'wan-ip 1 mode pppoe username AUD-03-00390-001 password rahasia.123 vlan-profile PPPoE host 1',
+        'wan-ip 1 mode pppoe username AUD-03-00390-001 password rahasia.123 vlan-profile briding host 1',
+      ],
+    ]);
+    expect(renderPreview(registerOnu(jgl))).toBe(renderPreview(registerOnuPppoeJgl(jgl)));
+  });
+
+  it('requires the PPPoE account, same verification lines, and each builder refuses the other mode', () => {
+    const { pppoePassword: _, ...noPassword } = jgl;
+    expect(() => registerOnu(noPassword)).toThrow(ZodError);
+    expect(() => registerOnu({ ...jgl, lanPorts: 2 })).toThrow(ZodError);
+    expect(expectedRegistrationLines(jgl)).toEqual(expectedRegistrationLines({ ...jgl, mode: 'pppoe_map' }));
+    expect(() => registerOnuPppoeJgl(pppoe)).toThrow(CommandBuildError);
+    expect(() => registerOnuPppoeMap(jgl)).toThrow(CommandBuildError);
+  });
+});
 
 describe('registerOnuPppoeMap (SPEC §8.5, mode pppoe_map)', () => {
   it("renders the owner's configuration: the ONU interface, then pon-onu-mng", () => {

@@ -234,6 +234,7 @@ Semua perintah dibangun oleh builder di `olt-spec`; tidak ada endpoint atau fung
 | `registerOnuBridge` | Template mode `bridge` di §8.5 | tulis | Fase 2 (14 Nov 2026) |
 | `registerOnuPppoeMap` | Template mode `pppoe_map` di §8.5 | tulis | Fase 2 (15 Nov 2026) |
 | `registerOnuBridgeStatic` | Template mode `bridge_static` di §8.5 | tulis | Fase 2 (17 Nov 2026) |
+| `registerOnuPppoeJgl` | Template mode `pppoe_jgl` di §8.5 | tulis | Fase 2 (25 Nov 2026) |
 | `writeConfig` | `write` | tulis | Fase 2: otomatis setelah registrasi terverifikasi, atau manual oleh admin |
 
 `show running-config` penuh sengaja tidak masuk allowlist karena memuat community SNMP dan password user OLT.
@@ -477,6 +478,7 @@ Sejak 13 Nov 2026 Fase 2 dibuka untuk semua OLT asli (keputusan pemilik repo, `C
 | Registrasi ONU mode `bridge` (konfigurasi lapangan), diikuti `write` setelah verifikasi | `onu_register` | A; T dengan persetujuan N | 14 Nov 2026 (OLT asli); baris remote-id `vport 2` dihapus 17 Nov 2026 |
 | Registrasi ONU mode `pppoe_map` ("PPPoE MAP", konfigurasi PPPoE lapangan), diikuti `write` setelah verifikasi | `onu_register` | A; T dengan persetujuan N | 15 Nov 2026 (OLT asli) |
 | Registrasi ONU mode `bridge_static` ("Bridge Static", layanan static dan bridging lapangan), diikuti `write` setelah verifikasi | `onu_register` | A; T dengan persetujuan N | 17 Nov 2026 (OLT asli) |
+| Registrasi ONU mode `pppoe_jgl` ("PPPoE-JGL", sama dengan PPPoE MAP tetapi `vlan-profile briding`), diikuti `write` setelah verifikasi | `onu_register` | A; T dengan persetujuan N | 25 Nov 2026 (OLT asli) |
 | `write` (simpan running-config) | `config_save` | A | 13 Nov 2026 (OLT asli) |
 
 Status job mengikuti technical brief, dengan tambahan berikut:
@@ -576,6 +578,12 @@ Verifikasi mode `pppoe_map` juga memeriksa:
 - `service AUD gemport 1 vlan {vlan}`
 - `wan-ip 1 mode pppoe username {pppoeUsername}`; cara OLT menampilkan password tidak ikut diperiksa
 
+Template mode `pppoe_jgl` (label "PPPoE-JGL") ditambahkan atas keputusan pemilik repo (25 Nov 2026). Isinya sama persis dengan template `pppoe_map`, termasuk field dan verifikasinya; satu-satunya beda ada di baris WAN, yang memakai `vlan-profile briding` (ejaan sesuai konfigurasi OLT lapangan; profil ini harus sudah ada di OLT):
+
+```
+wan-ip 1 mode pppoe username {pppoeUsername} password {pppoePassword} vlan-profile briding host 1
+```
+
 Template mode `bridge_static` (label "Bridge Static") mengikuti konfigurasi lapangan pemilik repo (17 Nov 2026). Satu ONU membawa dua layanan:
 
 - `static` di T-CONT 1, gemport `AUD`, dan vport 1 dengan `{vlan}` serta profil `{tcontProfile}`
@@ -639,13 +647,13 @@ Langkah yang berlaku untuk seluruh OLT (membuat `onu-type`, profil T-CONT, dan V
 | `onuType` | `^[A-Za-z0-9._-]{1,32}$`, diketik di form |
 | `tcontProfile` | `^[A-Za-z0-9._-]{1,32}$` dan ada di daftar profil T-CONT OLT itu |
 | `vlan` | Bilangan 1–4094 dan ada di daftar VLAN OLT itu |
-| `mode` | `default`, `bridge`, `pppoe_map`, atau `bridge_static`; tanpa nilai berarti `default` |
-| `description` | Hanya mode `bridge`, `pppoe_map`, dan `bridge_static`, opsional; `^[A-Za-z0-9._-]{1,32}$`, tanpa spasi seperti `name` (keputusan pemilik repo 14 Nov 2026) |
+| `mode` | `default`, `bridge`, `pppoe_map`, `bridge_static`, atau `pppoe_jgl`; tanpa nilai berarti `default` |
+| `description` | Hanya mode `bridge`, `pppoe_map`, `bridge_static`, dan `pppoe_jgl`, opsional; `^[A-Za-z0-9._-]{1,32}$`, tanpa spasi seperti `name` (keputusan pemilik repo 14 Nov 2026) |
 | `lanPorts` | Hanya mode `bridge` dan `bridge_static`, wajib; bilangan 1–4 |
 | `bridgeTcontProfile` | Hanya mode `bridge_static`, wajib; aturan sama dengan `tcontProfile` dan ada di daftar profil T-CONT OLT itu (keputusan pemilik repo 17 Nov 2026) |
 | `bridgeVlan` | Hanya mode `bridge_static`, wajib; bilangan 1–4094, ada di daftar VLAN OLT itu, dan berbeda dari `vlan` (keputusan pemilik repo 17 Nov 2026) |
-| `pppoeUsername` | Hanya mode `pppoe_map`, wajib; `^[A-Za-z0-9._@-]{1,64}$` (keputusan pemilik repo 15 Nov 2026) |
-| `pppoePassword` | Hanya mode `pppoe_map`, wajib; `^[A-Za-z0-9._@-]{1,32}$`; spasi, `?`, tanda kutip, dan simbol lain ditolak |
+| `pppoeUsername` | Hanya mode `pppoe_map` dan `pppoe_jgl`, wajib; `^[A-Za-z0-9._@-]{1,64}$` (keputusan pemilik repo 15 Nov 2026) |
+| `pppoePassword` | Hanya mode `pppoe_map` dan `pppoe_jgl`, wajib; `^[A-Za-z0-9._@-]{1,32}$`; spasi, `?`, tanda kutip, dan simbol lain ditolak |
 
 Sebagai pertahanan berlapis, builder juga menolak hasil akhir yang memuat CR, LF, atau karakter kontrol.
 

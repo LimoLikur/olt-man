@@ -55,10 +55,11 @@ const MODE_HINT: Record<string, string> = {
   default: 'Internet service (HSI) on eth_0/1, as in the C320 manual.',
   bridge: 'Bridging service on the VEIP, with SN binding and remote-id on vport 1.',
   pppoe_map: 'PPPoE WAN on the ONU with service AUD, SN binding and the PPPoE intermediate agent; ping, traceroute and web management answered.',
+  pppoe_jgl: 'As PPPoE MAP, but the WAN uses vlan-profile briding.',
   bridge_static: 'Two services with SN binding and remote-id on vport 1 and 2: static on gemport AUD (vport 1), bridging on the VEIP (vport 2).',
 };
 /** Templates with an optional `description` line. */
-const WITH_DESCRIPTION = ['bridge', 'pppoe_map', 'bridge_static'];
+const WITH_DESCRIPTION = ['bridge', 'pppoe_map', 'bridge_static', 'pppoe_jgl'];
 
 /**
  * Fase 2: compose an ONU registration, see the exact commands (ending in `write`), then confirm
@@ -89,7 +90,7 @@ export function ProvisionNewPage() {
           ? { lanPorts: Number(f.lanPorts) }
           : f.mode === 'bridge_static'
             ? { lanPorts: Number(f.lanPorts), bridgeTcontProfile: f.bridgeTcontProfile, bridgeVlan: Number(f.bridgeVlan) }
-            : f.mode === 'pppoe_map'
+            : f.mode === 'pppoe_map' || f.mode === 'pppoe_jgl'
               ? // The password is sent as typed: a space or other character the api refuses shows the error below.
                 { pppoeUsername: f.pppoeUsername.trim(), pppoePassword: f.pppoePassword }
               : {};
@@ -282,7 +283,7 @@ export function ProvisionNewPage() {
                         </Field>
                       </div>
                     )}
-                    {f.mode === 'pppoe_map' && (
+                    {(f.mode === 'pppoe_map' || f.mode === 'pppoe_jgl') && (
                       <>
                         <Field label="PPPoE username" hint="Letters, digits and . _ - @ (max. 64).">
                           <Input name="pppoeUsername" value={f.pppoeUsername} onChange={set('pppoeUsername')} placeholder="AUD-03-00000-001" required autoComplete="off" className="font-mono" disabled={!o} />

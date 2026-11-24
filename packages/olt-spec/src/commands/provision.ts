@@ -23,8 +23,8 @@ import { type AllowedCommand, CommandBuildError, mint } from './allowed.js';
 
 /**
  * Registration fields. `mode` picks the template (SPEC §8.5): `default` is the manual's internet
- * template, `bridge`, `pppoe_map` and `bridge_static` field configurations (owner decisions
- * 2026-11-14, 2026-11-15 and 2026-11-17). Without `mode` a job is `default`, so its preview and
+ * template, `bridge`, `pppoe_map`, `bridge_static` and `pppoe_jgl` field configurations (owner decisions
+ * 2026-11-14, 2026-11-15, 2026-11-17 and 2026-11-25). Without `mode` a job is `default`, so its preview and
  * hash stay what they were. A plain object, so the api can derive its draft from it (Zod 4 refuses
  * `.omit` on a refined schema); see checkProvisionMode.
  */
@@ -45,7 +45,7 @@ export const provisionParamsShape = z.strictObject({
   /** Bridge Static only: T-CONT 2 and the bridging service on vport 2 (owner decision 2026-11-17). */
   bridgeTcontProfile: tcontProfileSchema.optional(),
   bridgeVlan: vlanSchema.optional(),
-  /** PPPoE MAP only: the ONU's PPPoE account, sent and stored as typed (owner decision 2026-11-15). */
+  /** PPPoE MAP and PPPoE-JGL only: the ONU's PPPoE account, sent and stored as typed (owner decision 2026-11-15). */
   pppoeUsername: pppoeUsernameSchema.optional(),
   pppoePassword: pppoePasswordSchema.optional(),
 });
@@ -61,6 +61,7 @@ const MODE_FIELDS: Record<ProvisionMode, { allowed: readonly ModeField[]; requir
   bridge: { allowed: ['description', 'lanPorts'], required: ['lanPorts'] },
   pppoe_map: { allowed: ['description', 'pppoeUsername', 'pppoePassword'], required: ['pppoeUsername', 'pppoePassword'] },
   bridge_static: { allowed: ['description', 'lanPorts', 'bridgeTcontProfile', 'bridgeVlan'], required: ['lanPorts', 'bridgeTcontProfile', 'bridgeVlan'] },
+  pppoe_jgl: { allowed: ['description', 'pppoeUsername', 'pppoePassword'], required: ['pppoeUsername', 'pppoePassword'] },
 };
 
 /**
@@ -162,8 +163,20 @@ export function registerOnuBridge(input: ProvisionParamsInput): AllowedCommand[]
  * it is in the preview and the job as typed (owner decision 2026-11-15).
  */
 export function registerOnuPppoeMap(input: ProvisionParamsInput): AllowedCommand[] {
-  const p = paramsFor(input, 'pppoe_map');
-  if (p.pppoeUsername === undefined || p.pppoePassword === undefined) throw new CommandBuildError('PPPoE MAP registration without its PPPoE account');
+  return registerOnuPppoe(input, 'pppoe_map', 'PPPoE');
+}
+
+/**
+ * Mode `pppoe_jgl` ("PPPoE-JGL", owner decision 2026-11-25): the PPPoE MAP template line for line,
+ * except the WAN uses the OLT's vlan-profile "briding" (spelled as on the field OLT).
+ */
+export function registerOnuPppoeJgl(input: ProvisionParamsInput): AllowedCommand[] {
+  return registerOnuPppoe(input, 'pppoe_jgl', 'briding');
+}
+
+function registerOnuPppoe(input: ProvisionParamsInput, mode: 'pppoe_map' | 'pppoe_jgl', vlanProfile: 'PPPoE' | 'briding'): AllowedCommand[] {
+  const p = paramsFor(input, mode);
+  if (p.pppoeUsername === undefined || p.pppoePassword === undefined) throw new CommandBuildError(`${mode} registration without its PPPoE account`);
   const onu = `gpon-onu_1/${p.slot}/${p.port}:${p.onuId}`;
   const lines: Line[] = [
     session('configure terminal'),
@@ -181,7 +194,7 @@ export function registerOnuPppoeMap(input: ProvisionParamsInput): AllowedCommand
     session('exit'),
     session(`pon-onu-mng ${onu}`),
     config(`service AUD gemport 1 vlan ${p.vlan}`),
-    config(`wan-ip 1 mode pppoe username ${p.pppoeUsername} password ${p.pppoePassword} vlan-profile PPPoE host 1`),
+    config(`wan-ip 1 mode pppoe username ${p.pppoeUsername} password ${p.pppoePassword} vlan-profile ${vlanProfile} host 1`),
     config('wan-ip 1 ping-response enable traceroute-response enable'),
     config('security-mgmt 1 state enable mode forward protocol web'),
     session('end'),
@@ -240,6 +253,8 @@ export function registerOnu(input: ProvisionParamsInput): AllowedCommand[] {
       return registerOnuPppoeMap(p);
     case 'bridge_static':
       return registerOnuBridgeStatic(p);
+    case 'pppoe_jgl':
+      return registerOnuPppoeJgl(p);
     case 'default':
       return registerOnuInternet(p);
   }
@@ -265,7 +280,7 @@ export function expectedRegistrationLines(input: ProvisionParamsInput): { runnin
   const running = [`name ${p.name}`, `user-vlan ${p.vlan} vlan ${p.vlan}`];
   if (p.mode === 'default') return { running, mng: [`vlan ${p.vlan}`] };
   const withDescription = [...running, ...(p.description === undefined ? [] : [`description ${p.description}`])];
-  if (p.mode === 'pppoe_map') {
+  if (p.mode === 'pppoe_map' || p.mode === 'pppoe_jgl') {
     // The WAN line up to the username: how the OLT shows the password does not matter here.
     return { running: withDescription, mng: [`service AUD gemport 1 vlan ${p.vlan}`, `wan-ip 1 mode pppoe username ${p.pppoeUsername}`] };
   }

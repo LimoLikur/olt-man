@@ -100,7 +100,7 @@ export function ApprovalsPage() {
                       {/* A job without a mode is `default` (SPEC §8.5). */}
                       <Pill tone={(j.params.mode ?? 'default') === 'default' ? 'neutral' : 'info'}>{PROVISION_MODE_LABEL[j.params.mode ?? 'default'] ?? j.params.mode}</Pill>
                       {(j.params.mode === 'bridge' || j.params.mode === 'bridge_static') && <span className="text-xs text-muted-foreground">{plural(j.params.lanPorts ?? 0, 'LAN port')}</span>}
-                      {j.params.mode === 'pppoe_map' && <span className="font-mono text-xs text-muted-foreground">{j.params.pppoeUsername ?? '—'}</span>}
+                      {(j.params.mode === 'pppoe_map' || j.params.mode === 'pppoe_jgl') && <span className="font-mono text-xs text-muted-foreground">{j.params.pppoeUsername ?? '—'}</span>}
                     </dd>
                   </div>
                   <div>
