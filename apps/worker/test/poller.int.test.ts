@@ -11,6 +11,7 @@ import { POLL_YIELDED, type PollerDeps, PollYieldedError } from '../src/poller/c
 import { pollOptical } from '../src/poller/optical.js';
 import { pollStatus } from '../src/poller/status.js';
 import { runPoll } from '../src/runner/olt-runner.js';
+import type { SnmpLogEntry } from '../src/snmp/olt-snmp.client.js';
 
 let db: TestDatabase;
 let mock: RunningMock;
@@ -171,6 +172,59 @@ describe('poll.optical', () => {
       }
     }
     expect(await db.prisma.onuState.count({ where: { onu: { oltId }, rxDbm: { not: null } } })).toBe(mock.olt.onus.filter((o) => o.phase === 'working').length);
+  });
+
+  it('ONUs first seen by poll.optical get that Rx in onu_state with their first status cycle', async () => {
+    // A new OLT whose first successful cycle is optical: it creates the ONUs, but there is no
+    // onu_state row yet for its Rx (seen on a real OLT whose later optical cycles all timed out).
+    expect(await pollOptical(deps, oltId)).toMatchObject({ ok: true, changes: mock.olt.onus.length });
+    expect(await db.prisma.onuState.count({ where: { onu: { oltId } } })).toBe(0);
+    // The OLT's Rx moves on before the status cycle: the new row carries the measured value.
+    const moved = mock.olt.onus.find((o) => o.phase === 'working')!;
+    const measured = moved.rxOnuDbm;
+    mock.olt.setRx(moved, measured + 2);
+    expect(await pollStatus(deps, oltId)).toMatchObject({ ok: true });
+    const dec = (v: { toString(): string } | null) => v?.toString() ?? null;
+    const states = await db.prisma.onuState.findMany({ where: { onu: { oltId } }, include: { onu: { include: { metrics: true } } } });
+    expect(states).toHaveLength(mock.olt.onus.length);
+    for (const s of states) {
+      expect(s.onu.metrics).toHaveLength(1);
+      expect([dec(s.rxDbm), dec(s.oltRxDbm)]).toEqual([dec(s.onu.metrics[0]!.rxDbm), dec(s.onu.metrics[0]!.oltRxDbm)]);
+    }
+    expect(states.filter((s) => s.rxDbm !== null)).toHaveLength(mock.olt.onus.filter((o) => o.phase === 'working').length);
+    const movedState = () => db.prisma.onuState.findFirstOrThrow({ where: { onu: { oltId, onuIndex: moved.onuId, ponPort: { slot: moved.slot, port: moved.port } } } });
+    expect(Number((await movedState()).rxDbm)).toBeCloseTo(measured, 2);
+    // Later optical cycles write their own Rx as before; the seed is only for new rows.
+    await pollOptical(deps, oltId);
+    expect(Number((await movedState()).rxDbm)).toBeCloseTo(measured + 2, 2);
+  });
+});
+
+describe('SNMP operation log', () => {
+  const logged = () => {
+    const entries: SnmpLogEntry[] = [];
+    return { d: { ...deps, snmpLog: (e: SnmpLogEntry) => void entries.push(e) }, entries };
+  };
+
+  it('an optical cycle that times out logs the column that got no answer', async () => {
+    const { d, entries } = logged();
+    await pollStatus(d, oltId);
+    mock.olt.faults.dropAfterRequests = 1; // the identity GET, then silence (as on OLT pugar, 2026-11-20)
+    expect(await pollOptical(d, oltId)).toMatchObject({ ok: false, error: 'SnmpTimeoutError' });
+    expect(entries.filter((e) => e.error)).toEqual([
+      { olt: 'mock-1', op: 'optical', ms: expect.any(Number), error: 'SnmpTimeoutError', walks: [{ column: 'rxOnu', ms: expect.any(Number), error: 'SnmpTimeoutError' }] },
+    ]);
+  }, 20_000);
+
+  it('a cycle that gave way is not logged as a failure', async () => {
+    const { d, entries } = logged();
+    await pollStatus(d, oltId);
+    let calls = 0;
+    const checkpoint = async () => {
+      if (++calls === 3) throw new PollYieldedError();
+    };
+    expect(await pollOptical(d, oltId, { checkpoint })).toMatchObject({ ok: false, error: POLL_YIELDED });
+    expect(entries.filter((e) => e.error)).toEqual([]);
   });
 });
 

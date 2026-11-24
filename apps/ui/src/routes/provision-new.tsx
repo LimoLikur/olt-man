@@ -352,7 +352,7 @@ export function ProvisionNewPage() {
                     </b>{' '}
                     <span className="text-muted-foreground">(job #{create.data.id})</span>
                   </p>
-                  <pre data-testid="preview" className="mb-2 overflow-x-auto rounded-lg bg-foreground p-3 font-mono text-xs text-background">
+                  <pre data-testid="preview" className="mb-2 overflow-x-auto rounded-lg bg-code p-3 font-mono text-xs text-code-foreground">
                     {create.data.preview}
                   </pre>
                   <p className="mb-4 break-all text-xs text-muted-foreground">

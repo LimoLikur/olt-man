@@ -6,6 +6,7 @@ import { api, ApiError } from '../api';
 import { IconTile } from '../components/app/panel';
 import { BrandMark } from '../components/app/sidebar';
 import { OltStatusBadge, Pill, SegmentBar } from '../components/app/status';
+import { ThemeMenu } from '../components/app/theme-menu';
 import { Button, Input } from '../components/ui';
 
 export function LoginPage() {
@@ -44,7 +45,10 @@ export function LoginPage() {
   return (
     <div className="grid min-h-screen lg:grid-cols-[1fr_1.1fr]">
       <div className="flex flex-col px-6 py-8 sm:px-12">
-        <BrandMark />
+        <div className="flex items-center justify-between gap-3">
+          <BrandMark />
+          <ThemeMenu />
+        </div>
         <div className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center py-12">
           <h1 className="text-2xl font-semibold tracking-tight">Sign in to your NOC console</h1>
           <p className="mt-2 text-sm text-muted-foreground">Monitor ZTE C320 OLTs, track ONU signal health and approve new registrations.</p>

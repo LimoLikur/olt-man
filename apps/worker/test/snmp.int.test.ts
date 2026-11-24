@@ -6,7 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { TargetGuard, TargetNotAllowedError } from '../src/guards/target.guard.js';
 import { IdentityMismatchError, sysInfoValue, verifySnmpIdentity, withVerifiedIdentity } from '../src/identity/snmp-identity.js';
 import { SnmpAuthError, SnmpTimeoutError } from '../src/snmp/errors.js';
-import { OltSnmpClient, type OltSnmpTarget } from '../src/snmp/olt-snmp.client.js';
+import { OltSnmpClient, type OltSnmpTarget, type SnmpLogEntry } from '../src/snmp/olt-snmp.client.js';
 
 let mock: RunningMock;
 let port: number;
@@ -76,6 +76,50 @@ describe('OltSnmpClient against the mock', () => {
     const start = Date.now();
     await expect(client().onuStatus()).rejects.toBeInstanceOf(SnmpTimeoutError);
     expect(Date.now() - start).toBeLessThanOrEqual(7000);
+  }, 10_000);
+});
+
+describe('operation log', () => {
+  const OPTICAL_COLUMNS = ['rxOnu', 'rxOlt', 'name', 'description', 'serialNumber', 'type'];
+  // v2c: no engine discovery, so the mock counts exactly the requests below.
+  const logged = () => {
+    const entries: SnmpLogEntry[] = [];
+    const c = new OltSnmpClient(target(v2), guard, { timeoutMs: 300, log: (e) => entries.push(e) });
+    clients.push(c);
+    return { c, entries };
+  };
+
+  it('a table read logs each column walk in walk order, with its rows', async () => {
+    const { c, entries } = logged();
+    await c.onuOptical();
+    const n = mock.olt.onus.length;
+    expect(entries).toEqual([{ olt: 'mock-1', op: 'optical', ms: expect.any(Number), rows: n, walks: OPTICAL_COLUMNS.map((column) => ({ column, ms: expect.any(Number), rows: n })) }]);
+    await c.identity();
+    expect(entries[1]).toMatchObject({ olt: 'mock-1', op: 'identity' });
+    expect(entries[1]).not.toHaveProperty('walks');
+  });
+
+  it('a read that times out names the column that got no answer, after the walks that completed', async () => {
+    const rxOnu = OID_PROFILES['zte-c320-v2.1'].columns.rxOnu;
+    const since = mock.log.lastSeq;
+    await client(v2).onuOptical();
+    const rxOnuRequests = mock.log.entries('snmp-request', since).filter((e) => e.oids.some((oid) => oid === rxOnu || oid.startsWith(`${rxOnu}.`))).length;
+    expect(rxOnuRequests).toBeGreaterThan(1);
+    mock.olt.faults.dropAfterRequests = rxOnuRequests; // the whole rxOnu walk is answered, then silence
+    const { c, entries } = logged();
+    await expect(c.onuOptical()).rejects.toBeInstanceOf(SnmpTimeoutError);
+    expect(entries).toEqual([
+      {
+        olt: 'mock-1',
+        op: 'optical',
+        ms: expect.any(Number),
+        error: 'SnmpTimeoutError',
+        walks: [
+          { column: 'rxOnu', ms: expect.any(Number), rows: mock.olt.onus.length },
+          { column: 'rxOlt', ms: expect.any(Number), error: 'SnmpTimeoutError' },
+        ],
+      },
+    ]);
   }, 10_000);
 });
 

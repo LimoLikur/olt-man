@@ -4,7 +4,7 @@ import { type MouseEvent, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { ApiError } from '../../api';
 import { useMe } from '../../auth';
-import { age, oidProfileLabel } from '../../format';
+import { AGE_TARGET_S, age, ageLate, oidProfileLabel } from '../../format';
 import { type Identity, IDENTITY_KIND_LABEL, type IdentityRow, probeState, probeText } from '../../identity';
 import { can } from '../../permissions';
 import { portStats } from '../../pon';
@@ -112,7 +112,9 @@ export function OltCard({ olt }: { olt: OltSummary }) {
         <span>
           Alarms <span className="numeric font-medium text-foreground">{olt.activeAlarms}</span>
         </span>
-        <span className="ml-auto">Data age {age(olt.dataAgeS)}</span>
+        <span className="ml-auto" title="Time since the last successful poll. Targets: status 2 min, optical (Rx) 10 min.">
+          Data age <DataAge seconds={olt.dataAgeS} targetS={AGE_TARGET_S.status} /> · Rx <DataAge seconds={olt.opticalAgeS} targetS={AGE_TARGET_S.optical} testId="olt-optical-age" />
+        </span>
       </div>
 
       {/* Grows to the card bottom, so cards of different heights in a grid row still end with the keys. */}
@@ -152,6 +154,15 @@ export function OltCard({ olt }: { olt: OltSummary }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** One data age, orange once it is past its SPEC §8.1 target. */
+function DataAge({ seconds, targetS, testId }: { seconds: number | null; targetS: number; testId?: string }) {
+  return (
+    <span data-testid={testId} className={cx('numeric font-medium', ageLate(seconds, targetS) ? 'text-orange' : 'text-foreground')}>
+      {age(seconds)}
+    </span>
   );
 }
 

@@ -1,13 +1,13 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, ChevronsUpDown, ClipboardCheck, Inbox, KeyRound, LayoutDashboard, LogOut, type LucideIcon, Router, Server, ServerCog, Users, Waypoints } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { api } from '../../api';
 import { useMe } from '../../auth';
 import { initials, ROLE_LABEL } from '../../format';
 import { can, type Permission } from '../../permissions';
 import { useOlts } from '../../queries';
-import { cx } from '../ui';
+import { cx, useDismiss } from '../ui';
 import { NAValue } from './status';
 
 interface NavItem {
@@ -70,7 +70,7 @@ export function AppSidebar({ collapsed, mobileOpen, onClose }: { collapsed: bool
 
   return (
     <>
-      {mobileOpen && <div className="fixed inset-0 z-30 bg-foreground/25 md:hidden" onClick={onClose} aria-hidden />}
+      {mobileOpen && <div className="fixed inset-0 z-30 bg-scrim md:hidden" onClick={onClose} aria-hidden />}
       <aside
         className={cx(
           'fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[transform,width] duration-200 md:sticky md:top-0 md:h-screen md:translate-x-0',
@@ -142,22 +142,8 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(open, ref, close);
 
   const logout = async () => {
     await api.post('/auth/logout').catch(() => undefined);

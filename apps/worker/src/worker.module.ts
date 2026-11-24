@@ -14,6 +14,7 @@ const WORKER_ENV = Symbol('WORKER_ENV');
 @Injectable()
 class RunnerHost implements OnApplicationBootstrap, OnApplicationShutdown {
   private readonly logger = new Logger('OltRunner');
+  private readonly snmpLogger = new Logger('Snmp');
   private runner: OltRunner | undefined;
   private prisma: PrismaClient | undefined;
   private redis: Redis | undefined;
@@ -38,6 +39,10 @@ class RunnerHost implements OnApplicationBootstrap, OnApplicationShutdown {
         guard: new TargetGuard(env.OLT_TARGET_CIDRS, env.MOCK_OLT_CIDRS),
         publisher: new RedisEventPublisher(this.redis),
         now: () => new Date(),
+        // Failed and slow operations only, with the time of each column walk: names, counts and
+        // error names, never credentials or values.
+        snmpLog: (entry) =>
+          entry.error ? this.snmpLogger.warn(`operation failed ${JSON.stringify(entry)}`) : this.snmpLogger.log(`slow operation ${JSON.stringify(entry)}`),
       },
       uiBaseUrl: env.UI_BASE_URL,
       ...(outbox ? { outbox } : {}),

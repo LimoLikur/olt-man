@@ -1,3 +1,4 @@
+import type { Prisma } from '@olt/db';
 import { authFailuresInARow, quarantineOlt } from '../identity/quarantine.js';
 import { IdentityMismatchError, withVerifiedIdentity } from '../identity/snmp-identity.js';
 import { SnmpAuthError, SnmpTimeoutError } from '../snmp/errors.js';
@@ -33,6 +34,7 @@ export async function pollStatus(deps: PollerDeps, oltId: number, opts: PollOpti
     const ts = deps.now();
     const afterGap = olt.status !== 'ok';
     const previous = new Map((await prisma.onuState.findMany({ where: { onuId: { in: [...ids.values()] } } })).map((s) => [s.onuId, s]));
+    const firstRx = await latestRx(deps, [...ids.values()].filter((id) => !previous.has(id)));
     const changes: { onuId: number; from: string | null; to: string }[] = [];
 
     await prisma.$transaction(async (tx) => {
@@ -44,7 +46,7 @@ export async function pollStatus(deps: PollerDeps, oltId: number, opts: PollOpti
         const state = { phaseState: r.phase, adminState: r.adminEnabled ? 'enable' : 'disable', omccState: r.omccEnabled ? 'enable' : 'disable', updatedAt: ts };
         await tx.onuState.upsert({
           where: { onuId },
-          create: { onuId, ...state, lastChangeAt: ts },
+          create: { onuId, ...state, lastChangeAt: ts, ...firstRx.get(onuId) },
           update: { ...state, ...(changed ? { lastChangeAt: ts } : {}) },
         });
         if (changed) {
@@ -84,4 +86,19 @@ export async function pollStatus(deps: PollerDeps, oltId: number, opts: PollOpti
   } finally {
     client.close();
   }
+}
+
+/**
+ * Latest Rx per ONU from onu_metric, for ONUs that get their onu_state row now. An ONU first
+ * seen by poll.optical (inventory) has its Rx in onu_metric only: that cycle had no state row
+ * to update, and without this the Rx stays empty until the next successful optical cycle.
+ */
+async function latestRx(deps: PollerDeps, onuIds: number[]): Promise<Map<number, { rxDbm: Prisma.Decimal | null; oltRxDbm: Prisma.Decimal | null }>> {
+  if (onuIds.length === 0) return new Map();
+  const { prisma } = deps;
+  const latest = await prisma.onuMetric.groupBy({ by: ['onuId'], where: { onuId: { in: onuIds } }, _max: { ts: true } });
+  const at = latest.flatMap((l) => (l._max.ts ? [{ onuId: l.onuId, ts: l._max.ts }] : []));
+  if (at.length === 0) return new Map();
+  const rows = await prisma.onuMetric.findMany({ where: { OR: at }, select: { onuId: true, rxDbm: true, oltRxDbm: true } });
+  return new Map(rows.map(({ onuId, rxDbm, oltRxDbm }) => [onuId, { rxDbm, oltRxDbm }]));
 }

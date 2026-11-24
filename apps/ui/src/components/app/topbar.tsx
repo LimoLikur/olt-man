@@ -3,8 +3,9 @@ import { Bell, PanelLeft } from 'lucide-react';
 import { Link } from 'react-router';
 import { api } from '../../api';
 import { CommandSearch } from './command-search';
+import { ThemeMenu } from './theme-menu';
 
-/** Sticky header: sidebar toggle, quick search and the critical-alarm bell. */
+/** Sticky header: sidebar toggle, quick search, theme menu and the critical-alarm bell. */
 export function TopBar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const alarms = useQuery({ queryKey: ['alarms', 'active'], queryFn: () => api.get<{ severity: string }[]>('/alarms?state=active') });
   const critical = (alarms.data ?? []).filter((a) => a.severity === 'critical').length;
@@ -21,6 +22,7 @@ export function TopBar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
       <div className="flex min-w-0 flex-1 justify-center">
         <CommandSearch />
       </div>
+      <ThemeMenu />
       <Link
         to="/alarms"
         aria-label={critical ? `Alarms: ${critical} critical` : 'Alarms'}

@@ -88,7 +88,7 @@ export function JobPage() {
         <div className="grid items-start gap-6 lg:grid-cols-2">
           {j.preview && (
             <Panel title="Confirmed preview" icon={SquareTerminal} tone="primary">
-              <pre data-testid="job-preview" className="mb-2 overflow-x-auto rounded-lg bg-foreground p-3 font-mono text-xs text-background">
+              <pre data-testid="job-preview" className="mb-2 overflow-x-auto rounded-lg bg-code p-3 font-mono text-xs text-code-foreground">
                 {j.preview}
               </pre>
               <p className="break-all text-xs text-muted-foreground">sha256: {j.previewSha256}</p>

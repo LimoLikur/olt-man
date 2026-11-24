@@ -36,12 +36,25 @@ export interface OnuOpticalRow extends OnuRef {
   type: string | null;
 }
 
+/** One column walk of a table read. */
+export interface SnmpWalkLog {
+  column: OnuColumn;
+  ms: number;
+  rows?: number;
+  error?: string;
+}
+
 export interface SnmpLogEntry {
   olt: string;
   op: string;
   ms: number;
   rows?: number;
   error?: string;
+  /**
+   * Table reads: the column walks in walk order. When a walk fails, the last entry names that
+   * column; a cycle stopped between two walks (checkpoint) ends with the last completed walk.
+   */
+  walks?: SnmpWalkLog[];
 }
 
 /** Per-call options of the table reads. */
@@ -57,7 +70,7 @@ export interface OltSnmpClientOptions {
   timeoutMs?: number;
   retries?: number;
   maxRepetitions?: number;
-  /** Receives one entry per operation: no credentials, no values. */
+  /** Receives one entry per operation, with per-column walk times: no credentials, no values. */
   log?: (entry: SnmpLogEntry) => void;
 }
 
@@ -123,33 +136,36 @@ export class OltSnmpClient {
     };
   }
 
+  // The whole read is one timed operation, so the log counts ONU rows (not columns).
   async onuStatus(opts: TableReadOptions = {}): Promise<OnuStatusRow[]> {
     const p = this.target.profile;
-    const [phase, admin, omcc] = await this.timed('status', () => this.columns(['phaseState', 'adminState', 'omccState'], opts.checkpoint));
-    return [...phase!].map(([suffix, raw]) => ({
-      ...this.decode(suffix),
-      phase: p.phaseState(raw as number),
-      adminEnabled: p.adminEnabled(admin!.get(suffix) as number),
-      omccEnabled: omcc!.get(suffix) === 1,
-    }));
+    return this.timed('status', async (walks) => {
+      const [phase, admin, omcc] = await this.columns(['phaseState', 'adminState', 'omccState'], walks, opts.checkpoint);
+      return [...phase!].map(([suffix, raw]) => ({
+        ...this.decode(suffix),
+        phase: p.phaseState(raw as number),
+        adminEnabled: p.adminEnabled(admin!.get(suffix) as number),
+        omccEnabled: omcc!.get(suffix) === 1,
+      }));
+    });
   }
 
   async onuOptical(opts: TableReadOptions = {}): Promise<OnuOpticalRow[]> {
     const p = this.target.profile;
-    const [rxOnu, rxOlt, name, description, sn, type] = await this.timed('optical', () =>
-      this.columns(['rxOnu', 'rxOlt', 'name', 'description', 'serialNumber', 'type'], opts.checkpoint),
-    );
-    return [...rxOnu!].map(([suffix, raw]) => {
-      const serial = sn!.get(suffix);
-      return {
-        ...this.decode(suffix),
-        rxOnuDbm: p.rxOnuDbm(raw as number),
-        rxOltDbm: p.rxOltDbm(rxOlt!.get(suffix) as number),
-        name: text(name!.get(suffix)),
-        description: text(description!.get(suffix)),
-        sn: Buffer.isBuffer(serial) ? decodeSerialOrNull(p, serial) : null,
-        type: text(type!.get(suffix)),
-      };
+    return this.timed('optical', async (walks) => {
+      const [rxOnu, rxOlt, name, description, sn, type] = await this.columns(['rxOnu', 'rxOlt', 'name', 'description', 'serialNumber', 'type'], walks, opts.checkpoint);
+      return [...rxOnu!].map(([suffix, raw]) => {
+        const serial = sn!.get(suffix);
+        return {
+          ...this.decode(suffix),
+          rxOnuDbm: p.rxOnuDbm(raw as number),
+          rxOltDbm: p.rxOltDbm(rxOlt!.get(suffix) as number),
+          name: text(name!.get(suffix)),
+          description: text(description!.get(suffix)),
+          sn: Buffer.isBuffer(serial) ? decodeSerialOrNull(p, serial) : null,
+          type: text(type!.get(suffix)),
+        };
+      });
     });
   }
 
@@ -172,16 +188,24 @@ export class OltSnmpClient {
   /**
    * Walks several ONU columns; all must have exactly the same row set. Rows are keyed by the plain
    * ONU index, without column-specific arcs (rxOnu is ponIfIndex.onuId.1, rxOlt ponIfIndex.onuId).
-   * `checkpoint` runs before each column, never during one.
+   * `checkpoint` runs before each column, never during one. Each walk, failed or not, is
+   * appended to `walks` for the log.
    */
-  private async columns(names: OnuColumn[], checkpoint?: () => Promise<void>): Promise<Map<string, unknown>[]> {
+  private async columns(names: OnuColumn[], walks: SnmpWalkLog[], checkpoint?: () => Promise<void>): Promise<Map<string, unknown>[]> {
     const p = this.target.profile;
     const out: Map<string, unknown>[] = [];
     for (const name of names) {
       await checkpoint?.();
-      const rows = new Map<string, unknown>();
-      for (const [suffix, value] of await this.walk(p.columns[name])) rows.set(p.encodeOnuIndex(this.decode(suffix, name)).join('.'), value);
-      out.push(rows);
+      const start = Date.now();
+      try {
+        const rows = new Map<string, unknown>();
+        for (const [suffix, value] of await this.walk(p.columns[name])) rows.set(p.encodeOnuIndex(this.decode(suffix, name)).join('.'), value);
+        walks.push({ column: name, ms: Date.now() - start, rows: rows.size });
+        out.push(rows);
+      } catch (error) {
+        walks.push({ column: name, ms: Date.now() - start, error: (error as Error).name });
+        throw error;
+      }
     }
     const keys = [...out[0]!.keys()].sort().join(',');
     out.forEach((col, i) => {
@@ -217,14 +241,17 @@ export class OltSnmpClient {
     return new SnmpError(this.target.name, error.name);
   }
 
-  private async timed<T>(op: string, fn: () => Promise<T>): Promise<T> {
+  /** Runs one operation and logs it; a table read collects its column walks in `walks`. */
+  private async timed<T>(op: string, fn: (walks: SnmpWalkLog[]) => Promise<T>): Promise<T> {
     const start = Date.now();
+    const walks: SnmpWalkLog[] = [];
+    const entry = (outcome: Pick<SnmpLogEntry, 'rows' | 'error'>): SnmpLogEntry => ({ olt: this.target.name, op, ms: Date.now() - start, ...outcome, ...(walks.length ? { walks } : {}) });
     try {
-      const result = await fn();
-      this.opts.log?.({ olt: this.target.name, op, ms: Date.now() - start, ...(Array.isArray(result) ? { rows: result.length } : {}) });
+      const result = await fn(walks);
+      this.opts.log?.(entry(Array.isArray(result) ? { rows: result.length } : {}));
       return result;
     } catch (error) {
-      this.opts.log?.({ olt: this.target.name, op, ms: Date.now() - start, error: (error as Error).name });
+      this.opts.log?.(entry({ error: (error as Error).name }));
       throw error;
     }
   }

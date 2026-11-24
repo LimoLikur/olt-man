@@ -70,6 +70,10 @@ export interface OltSummary {
   lastPollOkAt: string | null;
   /** Seconds since the last successful status poll; null = never. */
   dataAgeS: number | null;
+  /** End of the last successful optical poll (Rx), from poll_run (SPEC §8.1); null = never. */
+  lastOpticalOkAt: string | null;
+  /** Seconds since lastOpticalOkAt; null = never. */
+  opticalAgeS: number | null;
   onus: { total: number; online: number; offline: number };
   activeAlarms: number;
   /**

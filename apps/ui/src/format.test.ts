@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { age, ago, duration, initials, oidProfileLabel, onuStatusText, pct, plural, setTimeZone } from './format';
+import { AGE_TARGET_S, age, ageLate, ago, duration, initials, oidProfileLabel, onuStatusText, pct, plural, setTimeZone } from './format';
 
 describe('format', () => {
   it('shows the last known ONU phase while the OLT is not ok (SPEC §8.2)', () => {
@@ -20,6 +20,11 @@ describe('format', () => {
     expect(age(42)).toBe('42 s');
     expect(age(125)).toBe('2 min');
     expect(age(7300)).toBe('2 h');
+    expect(age(6 * 86_400 + 7300)).toBe('6 d');
+    expect(ageLate(null, AGE_TARGET_S.optical)).toBe(false);
+    expect(ageLate(600, AGE_TARGET_S.optical)).toBe(false);
+    expect(ageLate(601, AGE_TARGET_S.optical)).toBe(true);
+    expect(ageLate(121, AGE_TARGET_S.status)).toBe(true);
     expect(duration(93_784)).toBe('1d 2h');
     expect(duration(3_900)).toBe('1h 5m');
     expect(duration(null)).toBe('—');

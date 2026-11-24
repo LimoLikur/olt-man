@@ -1,7 +1,26 @@
 // Small shadcn-style building blocks (Tailwind only, no injected <style>: the CSP has style-src 'self').
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import { type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type RefObject, type SelectHTMLAttributes, type TextareaHTMLAttributes, useEffect } from 'react';
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
+
+/** While `open`: a mouse press outside `ref` or the Escape key calls `close` (dropdown menus). */
+export function useDismiss(open: boolean, ref: RefObject<HTMLElement | null>, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open, ref, close]);
+}
 
 // Size groups a caller's className may override (no tailwind-merge: two `h-*` classes would
 // otherwise both apply, and the CSS order would decide).
@@ -169,7 +188,7 @@ export function Segmented<T extends string>({ value, onChange, items, label }: {
           role="radio"
           aria-checked={value === t.value}
           onClick={() => onChange(t.value)}
-          className={cx('h-7 rounded-md px-2.5 font-medium transition-colors', value === t.value ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
+          className={cx('h-7 rounded-md px-2.5 font-medium transition-colors', value === t.value ? 'bg-card text-foreground shadow-sm dark:bg-input/60' : 'text-muted-foreground hover:text-foreground')}
         >
           {t.label}
         </button>

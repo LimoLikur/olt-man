@@ -157,6 +157,26 @@ describe('ONUs, alarms, refresh', () => {
     expect(olt.dataAgeS).toBeLessThan(60);
   });
 
+  it('optical data age comes from the last successful optical poll_run (SPEC §8.1)', async () => {
+    const summary = async () => (await call(t, teknisi, 'GET', `/olts/${oltId}`)).body as { dataAgeS: number | null; lastOpticalOkAt: string | null; opticalAgeS: number | null };
+    expect(await summary()).toMatchObject({ lastOpticalOkAt: null, opticalAgeS: null });
+    const now = t.clock.now().getTime();
+    const okAt = new Date(now - 20 * 60_000);
+    await t.db.prisma.pollRun.createMany({
+      data: [
+        { oltId, kind: 'optical', startedAt: new Date(okAt.getTime() - 5000), finishedAt: okAt, ok: true },
+        // Newer, but neither counts: a failed optical cycle and a status cycle.
+        { oltId, kind: 'optical', startedAt: new Date(now - 6000), finishedAt: new Date(now), ok: false, error: 'SnmpTimeoutError' },
+        { oltId, kind: 'status', startedAt: new Date(now - 1000), finishedAt: new Date(now), ok: true },
+      ],
+    });
+    const s = await summary();
+    expect(s.lastOpticalOkAt).toBe(okAt.toISOString());
+    expect(s.opticalAgeS).toBeGreaterThanOrEqual(20 * 60);
+    expect(s.opticalAgeS).toBeLessThan(21 * 60);
+    expect(s.dataAgeS).toBeLessThan(60);
+  });
+
   it('GET /onus filters by phase, Rx band and search (name, SN, index)', async () => {
     const q = async (qs: string) => ((await call(t, noc, 'GET', `/onus?oltId=${oltId}&${qs}`)).body as { total: number; items: { sn: string }[] });
     expect((await q('phase=los')).items.map((i) => i.sn)).toEqual(['ZTEG00000A02']);

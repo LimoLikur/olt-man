@@ -333,6 +333,8 @@ Halaman UI (responsif, berbahasa Inggris sejak 14 Nov 2026; tampilannya mengikut
 
 OLT mock diberi label "MOCK" yang jelas di semua halaman.
 
+UI punya tema terang dan gelap. Pengguna memilih Light, Dark, atau System (default, mengikuti tema OS) dari tombol tema di top bar atau halaman login. Pilihan disimpan per browser (`localStorage`), dan `public/theme-init.js` menerapkannya sebelum paint pertama, karena CSP tidak mengizinkan inline script.
+
 Kotak port PON dihitung dari daftar ONU OLT, jadi hanya port yang punya ONU yang tampil. Angkanya jumlah ONU terdaftar; warnanya merah bila ada ONU LOS dan kuning bila ada Rx di bawah −25 dBm. Selama status OLT bukan normal, kotak port dan jumlah per fase menampilkan nilai terakhir yang diketahui dan ditandai "last known".
 
 Bagian bawah kartu OLT menampilkan kunci identitas OLT (host key SSH, engine ID SNMPv3, atau sysName dan sysObjectID untuk v2c), baik yang sudah di-pin maupun kandidat dari probe, supaya bisa dibandingkan dengan konsol OLT. Admin dan NOC mendapat tombol "Pin…" di samping lencana identitas selama masih ada jenis identitas yang belum di-pin. Tombol itu baru aktif bila ada kandidat dan meminta konfirmasi, lalu memanggil endpoint pin yang sama dengan panel identitas (§8.4 langkah 2). Untuk OLT yang dikarantina tidak ada tombol pin; perubahan tetap diterima admin di halaman OLT. Teknisi melihat kunci sebagai N/A.

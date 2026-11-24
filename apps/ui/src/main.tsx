@@ -6,6 +6,9 @@ import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router';
 import { router } from './router';
 import './styles.css';
+import { initTheme } from './theme';
+
+initTheme();
 
 // Monitoring data refreshes every 10 s (Socket.IO replaced by polling, PLAN [usulan]).
 const queryClient = new QueryClient({ defaultOptions: { queries: { refetchInterval: 10_000, staleTime: 5_000 } } });

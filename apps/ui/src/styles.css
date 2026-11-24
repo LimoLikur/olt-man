@@ -1,10 +1,13 @@
 @import 'tailwindcss';
 
 /*
- * Design tokens and utilities ported from the fiber-signal-command prototype (light theme only).
+ * Design tokens and utilities ported from the fiber-signal-command prototype, with a dark theme
+ * on `html.dark` (src/theme.ts; public/theme-init.js sets it before the first paint).
  * Fonts are self-hosted and imported in src/main.tsx: the CSP allows font-src 'self' only, and
  * no <style> element may be injected at runtime (style-src 'self').
  */
+
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
   --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
@@ -45,6 +48,9 @@
   --color-info: var(--info);
   --color-info-soft: var(--info-soft);
   --color-segment-empty: var(--segment-empty);
+  --color-scrim: var(--scrim);
+  --color-code: var(--code);
+  --color-code-foreground: var(--code-foreground);
 
   --color-border: var(--border);
   --color-input: var(--input);
@@ -62,6 +68,7 @@
 }
 
 :root {
+  color-scheme: light;
   --radius: 0.75rem;
 
   /* Neutral canvas: cool grey with a faint violet cast */
@@ -99,6 +106,11 @@
   --info-soft: oklch(0.955 0.03 250);
   --segment-empty: oklch(0.9 0.004 286);
 
+  /* Backdrop behind drawers and dialogs; command previews (terminal look in both themes) */
+  --scrim: oklch(0.2 0.012 286 / 25%);
+  --code: oklch(0.2 0.012 286);
+  --code-foreground: oklch(0.974 0.003 286);
+
   --border: oklch(0.915 0.005 286);
   --input: oklch(0.905 0.006 286);
   --ring: oklch(0.53 0.215 289 / 45%);
@@ -111,6 +123,71 @@
 
   --panel-shadow: 0 1px 2px oklch(0.2 0.02 286 / 4%), 0 1px 0 oklch(0.2 0.02 286 / 2%);
   --lift-shadow: 0 10px 30px -12px oklch(0.3 0.06 289 / 18%), 0 2px 6px -2px oklch(0.2 0.02 286 / 6%);
+}
+
+/*
+ * Dark theme. Status colours are lighter than in the light theme so their text stays at WCAG AA
+ * on the dark card and on their -soft fills. The violet is lighter too, so text on a primary
+ * fill (buttons, badges, PON tiles) turns dark: white text on it would fall below AA.
+ * Keep the hex copies in src/components/app/charts.tsx in sync.
+ */
+.dark {
+  color-scheme: dark;
+
+  --background: oklch(0.165 0.008 286);
+  --foreground: oklch(0.95 0.004 286);
+  --card: oklch(0.205 0.009 286);
+  --card-foreground: oklch(0.95 0.004 286);
+  --popover: oklch(0.225 0.01 286);
+  --popover-foreground: oklch(0.95 0.004 286);
+
+  --primary: oklch(0.7 0.16 289);
+  --primary-foreground: oklch(0.18 0.03 289);
+  --primary-soft: oklch(0.27 0.065 290);
+
+  --secondary: oklch(0.255 0.009 286);
+  --secondary-foreground: oklch(0.88 0.006 286);
+  --muted: oklch(0.255 0.009 286);
+  --muted-foreground: oklch(0.71 0.012 286);
+  --accent: oklch(0.265 0.01 286);
+  --accent-foreground: oklch(0.95 0.004 286);
+  --destructive: oklch(0.58 0.2 25);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --success: oklch(0.72 0.15 156);
+  --success-soft: oklch(0.27 0.05 156);
+  --warning: oklch(0.8 0.15 82);
+  --warning-soft: oklch(0.29 0.05 85);
+  --orange: oklch(0.75 0.16 55);
+  --orange-soft: oklch(0.28 0.06 50);
+  --critical: oklch(0.68 0.18 25);
+  --critical-soft: oklch(0.26 0.055 25);
+  --info: oklch(0.71 0.13 250);
+  --info-soft: oklch(0.27 0.05 250);
+  --segment-empty: oklch(0.31 0.008 286);
+
+  --scrim: oklch(0 0 0 / 55%);
+  --code: oklch(0.13 0.008 286);
+  --code-foreground: oklch(0.92 0.004 286);
+
+  --border: oklch(0.29 0.009 286);
+  --input: oklch(0.33 0.01 286);
+  --ring: oklch(0.7 0.16 289 / 50%);
+
+  --sidebar: oklch(0.185 0.008 286);
+  --sidebar-foreground: oklch(0.82 0.008 286);
+  --sidebar-accent: oklch(0.255 0.01 286);
+  --sidebar-accent-foreground: oklch(0.96 0.004 286);
+  --sidebar-border: oklch(0.29 0.009 286);
+
+  --panel-shadow: 0 1px 2px oklch(0 0 0 / 30%), 0 1px 0 oklch(0 0 0 / 20%);
+  --lift-shadow: 0 10px 30px -12px oklch(0 0 0 / 65%), 0 2px 6px -2px oklch(0 0 0 / 40%);
+}
+
+/* Set for one frame while the theme changes, so colours switch at once instead of animating. */
+.theme-switching,
+.theme-switching * {
+  transition: none !important;
 }
 
 @layer base {

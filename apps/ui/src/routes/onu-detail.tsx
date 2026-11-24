@@ -109,7 +109,10 @@ export function OnuDetailPage() {
   const o = onu.data;
   const d = o.lastDetail;
   const att = d?.attenuation;
-  const isMock = olts.data?.find((x) => x.id === o.oltId)?.isMock ?? false;
+  const olt = olts.data?.find((x) => x.id === o.oltId);
+  const isMock = olt?.isMock ?? false;
+  // Rx comes from the OLT's optical poll: say how old it is, so an empty or stale value explains itself.
+  const rxHint = olt && (olt.lastOpticalOkAt ? `Optical poll ${ago(olt.lastOpticalOkAt)}` : 'No optical poll yet');
   const level = o.oltStatus === 'ok' ? rxLevel(o.rxDbm) : 'none';
   const points = metrics.data ?? [];
   const rx = points.map((p) => p.rxDbm).filter((v): v is number => v !== null);
@@ -170,9 +173,10 @@ export function OnuDetailPage() {
             tone={LEVEL_TONE[level]}
             value={<RxValue value={o.rxDbm} unit={false} className="font-sans text-[28px]" />}
             chip={level === 'none' ? 'No reading' : level === 'good' ? 'dBm · in range' : 'dBm · low'}
+            hint={rxHint}
           />
           <StatCard title="ONU Tx power" icon={Radio} tone="primary" value={fixed(att?.upstream.onuTxDbm)} chip="dBm" hint={d ? `From CLI, ${ago(d.at)}` : 'Use “Refresh from OLT”'} />
-          <StatCard title="OLT Rx power" icon={Gauge} tone="info" value={fixed(o.oltRxDbm)} chip="dBm" />
+          <StatCard title="OLT Rx power" icon={Gauge} tone="info" value={fixed(o.oltRxDbm)} chip="dBm" hint={rxHint} />
           <StatCard
             title="Fiber distance"
             icon={MoveHorizontal}

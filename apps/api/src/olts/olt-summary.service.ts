@@ -39,10 +39,13 @@ export class OltSummaryService {
       select: { oltId: true, state: { select: { phaseState: true } } },
     });
     const flagged = new Set((await this.prisma.alarm.findMany({ where: { oltId: { in: ids }, ...IDENTITY_ALARM }, select: { oltId: true }, distinct: ['oltId'] })).map((a) => a.oltId));
+    const lastOptical = await this.lastOpticalOk(ids);
     const now = this.clock.now().getTime();
+    const ageS = (at: Date | null | undefined) => (at ? Math.max(0, Math.round((now - at.getTime()) / 1000)) : null);
     return olts.map((o) => {
       const onus = perOlt.filter((x) => x.oltId === o.id);
       const online = onus.filter((x) => x.state?.phaseState === 'working').length;
+      const opticalAt = lastOptical.get(o.id);
       return {
         id: o.id,
         name: o.name,
@@ -56,12 +59,25 @@ export class OltSummaryService {
         sshAlgorithms: sshAlgorithmsSchema.catch({}).parse(o.sshAlgorithms),
         identityLevel: identityLevel(o.snmpVersion, o.cliEnabled, o.identities.map((i) => i.kind)),
         lastPollOkAt: iso(o.lastPollOkAt),
-        dataAgeS: o.lastPollOkAt ? Math.max(0, Math.round((now - o.lastPollOkAt.getTime()) / 1000)) : null,
+        dataAgeS: ageS(o.lastPollOkAt),
+        lastOpticalOkAt: iso(opticalAt),
+        opticalAgeS: ageS(opticalAt),
         onus: { total: onus.length, online, offline: onus.length - online },
         activeAlarms: o._count.alarms,
         identityProblem: o.status === 'quarantined' || flagged.has(o.id),
       };
     });
+  }
+
+  /**
+   * End of the last successful optical cycle per OLT (SPEC §8.1). One lookup per OLT on the
+   * (olt_id, kind, started_at) index: it stops at the newest ok row instead of scanning 90 days.
+   */
+  private async lastOpticalOk(ids: number[]): Promise<Map<number, Date | null>> {
+    const runs = await Promise.all(
+      ids.map((oltId) => this.prisma.pollRun.findFirst({ where: { oltId, kind: 'optical', ok: true }, orderBy: { startedAt: 'desc' }, select: { oltId: true, finishedAt: true } })),
+    );
+    return new Map(runs.flatMap((r) => (r ? [[r.oltId, r.finishedAt] as const] : [])));
   }
 }
 

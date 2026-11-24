@@ -4,7 +4,7 @@ import { ArrowUpRight, Bell, ClipboardCheck, Router, Server, Signal } from 'luci
 import { Link } from 'react-router';
 import { api } from '../api';
 import { useMe } from '../auth';
-import { BarChart, CHART_COLORS } from '../components/app/charts';
+import { BarChart } from '../components/app/charts';
 import { OltCard } from '../components/app/olt-card';
 import { PageBody, PageHeader, Panel, SectionLabel, StatCard } from '../components/app/panel';
 import { alarmLabel, NAValue, SeverityBadge } from '../components/app/status';
@@ -52,9 +52,9 @@ export function DashboardPage() {
     { label: 'Other', n: other, bar: 'bg-info/60' },
   ];
   const buckets = [
-    { label: '≥ −25', value: rxOk.data ?? 0, color: CHART_COLORS.primary },
-    { label: '−27 … −25', value: rxWarn.data ?? 0, color: CHART_COLORS.orange },
-    { label: '< −27', value: rxCrit.data ?? 0, color: CHART_COLORS.critical },
+    { label: '≥ −25', value: rxOk.data ?? 0, color: 'primary' as const },
+    { label: '−27 … −25', value: rxWarn.data ?? 0, color: 'orange' as const },
+    { label: '< −27', value: rxCrit.data ?? 0, color: 'critical' as const },
   ];
 
   return (

@@ -16,13 +16,20 @@ export const NA = 'N/A';
 
 export const dbm = (v: number | null | undefined) => (v === null || v === undefined ? '—' : `${v.toFixed(2)} dBm`);
 
-/** Age of the last successful poll, from OltSummary.dataAgeS. */
+/** Age of the last successful poll, from OltSummary.dataAgeS or opticalAgeS. */
 export function age(seconds: number | null): string {
   if (seconds === null) return 'never';
   if (seconds < 60) return `${seconds} s`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
-  return `${Math.floor(seconds / 3600)} h`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3600)} h`;
+  return `${Math.floor(seconds / 86_400)} d`;
 }
+
+/** Data age targets of SPEC §8.1: status within 2 minutes, optical (Rx) within 10 minutes. */
+export const AGE_TARGET_S = { status: 120, optical: 600 } as const;
+
+/** Older than its target; "never polled" is not late (a new or pending OLT says so itself). */
+export const ageLate = (seconds: number | null, targetS: number): boolean => seconds !== null && seconds > targetS;
 
 const relative = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
 

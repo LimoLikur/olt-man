@@ -15,12 +15,18 @@ import { KeyValue, PageBody, PageHeader, Panel, StatCard } from '../components/a
 import { PonLegend, PonTiles } from '../components/app/pon-tiles';
 import { IdentityBadge, MockBadge, NAValue, OltStatusBadge, Pill, SegmentBar } from '../components/app/status';
 import { Button, buttonClass, Empty, Loading } from '../components/ui';
-import { age, dateTime, dbm, oidProfileLabel, plural } from '../format';
+import { AGE_TARGET_S, age, ageLate, dateTime, dbm, oidProfileLabel, plural } from '../format';
 import { can } from '../permissions';
 import { type PhaseCount, phaseTotal, portStats } from '../pon';
 import { useOltOnus } from '../queries';
 
 const PAGE = 15;
+
+/** When a poll last succeeded and how long ago; orange once past its SPEC §8.1 target. */
+function LastPoll({ at, seconds, targetS }: { at: string | null; seconds: number | null; targetS: number }) {
+  if (!at) return <>never</>;
+  return <span className={ageLate(seconds, targetS) ? 'text-orange' : undefined}>{`${dateTime(at)} (${age(seconds)} ago)`}</span>;
+}
 
 export function OltDetailPage() {
   const { id } = useParams();
@@ -167,7 +173,12 @@ export function OltDetailPage() {
               <KeyValue label="PON ports">
                 {ports.length} detected · up <NAValue />
               </KeyValue>
-              <KeyValue label="Last poll">{o.lastPollOkAt ? `${dateTime(o.lastPollOkAt)} (${age(o.dataAgeS)} ago)` : 'never'}</KeyValue>
+              <KeyValue label="Last status poll">
+                <LastPoll at={o.lastPollOkAt} seconds={o.dataAgeS} targetS={AGE_TARGET_S.status} />
+              </KeyValue>
+              <KeyValue label="Last optical poll (Rx)">
+                <LastPoll at={o.lastOpticalOkAt} seconds={o.opticalAgeS} targetS={AGE_TARGET_S.optical} />
+              </KeyValue>
             </dl>
             <div className="mt-3">
               <div className="mb-1.5 flex justify-between text-xs text-muted-foreground">
