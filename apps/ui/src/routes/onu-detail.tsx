@@ -6,7 +6,7 @@ import { Link, useParams } from 'react-router';
 import { api, ApiError } from '../api';
 import { RxChart, type RxPoint } from '../components/app/charts';
 import { KeyValue, PageBody, PageHeader, Panel, StatCard, type Tone } from '../components/app/panel';
-import { DisabledAction, MockBadge, NAValue, PhaseBadge, RxValue } from '../components/app/status';
+import { MockBadge, NAValue, PhaseBadge, RxValue } from '../components/app/status';
 import { Button, buttonClass, Callout, cx, Empty, Loading, Segmented, Table, Td, Th } from '../components/ui';
 import { ago, dateTime, dbm, duration, onuStatusText, PHASE_LABEL } from '../format';
 import { useOlts } from '../queries';
@@ -19,6 +19,8 @@ interface History {
   cause: string | null;
 }
 interface OnuDetail extends OnuView {
+  archivedAt: string | null;
+  removedAt: string | null;
   lastDetail: null | {
     jobId: number;
     at: string;
@@ -31,8 +33,15 @@ interface OnuDetail extends OnuView {
 }
 interface Job {
   status: string;
-  result: { error?: string; reason?: string; screen?: string } | null;
+  result: { error?: string; message?: string; reason?: string; screen?: string } | null;
 }
+/** POST /onus/:id/reboot: the template to confirm (SPEC §8.5, owner decision 2026-11-27). */
+interface RebootPreview {
+  id: number;
+  preview: string;
+  previewSha256: string;
+}
+type Message = { text: string; tone: 'neutral' | 'success' | 'critical'; jobId?: number };
 interface OnuEvent {
   id: number;
   ts: string;
@@ -52,6 +61,9 @@ const JOB_ERRORS: Record<string, string> = {
 };
 
 const LEVEL_TONE: Record<ReturnType<typeof rxLevel>, Tone> = { good: 'success', warning: 'warning', critical: 'critical', none: 'neutral' };
+const DONE = ['succeeded', 'failed', 'blocked', 'cancelled'];
+/** Phases in which the OLT cannot reach the ONU, so a reboot cannot either. */
+const UNREACHABLE = new Set(['los', 'dying_gasp', 'offline']);
 const EVENT_DOT: Record<string, string> = { working: 'bg-success', los: 'bg-critical', dying_gasp: 'bg-orange', offline: 'bg-muted-foreground/60' };
 const DAY = 24 * 3600_000;
 
@@ -60,8 +72,10 @@ const fixed = (v: number | null | undefined) => (v === null || v === undefined ?
 export function OnuDetailPage() {
   const { id } = useParams();
   const qc = useQueryClient();
-  const [jobId, setJobId] = useState<number | null>(null);
-  const [message, setMessage] = useState<{ text: string; tone: 'neutral' | 'success' | 'critical' } | null>(null);
+  // The job this page follows until it ends: a detail refresh or a reboot.
+  const [follow, setFollow] = useState<{ id: number; kind: 'refresh' | 'reboot' } | null>(null);
+  const [reboot, setReboot] = useState<RebootPreview | null>(null);
+  const [message, setMessage] = useState<Message | null>(null);
   const [range, setRange] = useState<'24h' | '7d'>('24h');
   const [metric, setMetric] = useState<'rx' | 'tx'>('rx');
   const [copied, setCopied] = useState(false);
@@ -75,22 +89,23 @@ export function OnuDetailPage() {
   });
   const events = useQuery({ queryKey: ['onu', id, 'events'], queryFn: () => api.get<OnuEvent[]>(`/onus/${id}/events`) });
 
-  // Follow the refresh job until it finishes, then reload the ONU.
+  // Follow the job until it finishes, then reload the ONU.
   useQuery({
-    queryKey: ['job', jobId],
-    enabled: jobId !== null,
+    queryKey: ['job', follow?.id],
+    enabled: follow !== null,
     refetchInterval: 1000,
     queryFn: async () => {
+      const { id: jobId, kind } = follow!;
       const job = await api.get<Job>(`/jobs/${jobId}`);
-      if (['succeeded', 'failed', 'blocked', 'cancelled'].includes(job.status)) {
-        setJobId(null);
+      if (DONE.includes(job.status)) {
+        setFollow(null);
         const why = job.result?.reason ? ` Reason: ${job.result.reason}.` : '';
         const screen = job.result?.screen ? ` Last OLT screen: "${job.result.screen.trim().slice(-200)}"` : '';
-        setMessage(
-          job.status === 'succeeded'
-            ? { text: 'ONU details updated.', tone: 'success' }
-            : { text: `${JOB_ERRORS[job.result?.error ?? ''] ?? 'Refresh failed.'}${why}${screen}`, tone: 'critical' },
-        );
+        // A reboot's own checks (SN, online) explain themselves in result.message.
+        const failed = (kind === 'reboot' && job.result?.message) || `${JOB_ERRORS[job.result?.error ?? ''] ?? (kind === 'reboot' ? 'Reboot failed.' : 'Refresh failed.')}${why}${screen}`;
+        if (job.status !== 'succeeded') setMessage({ text: failed, tone: 'critical', ...(kind === 'reboot' ? { jobId } : {}) });
+        else if (kind === 'reboot') setMessage({ text: 'Reboot sent. The ONU restarts and is offline for about 1–2 minutes; the status updates with the next poll.', tone: 'success', jobId });
+        else setMessage({ text: 'ONU details updated.', tone: 'success' });
         await qc.invalidateQueries({ queryKey: ['onu', id] });
       }
       return job;
@@ -100,10 +115,39 @@ export function OnuDetailPage() {
     mutationFn: () => api.post<{ jobId: number }>(`/onus/${id}/refresh`),
     onSuccess: (r) => {
       setMessage({ text: 'Fetching details from the OLT…', tone: 'neutral' });
-      setJobId(r.jobId);
+      setFollow({ id: r.jobId, kind: 'refresh' });
     },
     onError: (e) => setMessage({ text: e instanceof ApiError ? e.message : 'Refresh failed.', tone: 'critical' }),
   });
+  // Reboot: the api returns the preview; it runs only once the user confirms that exact text.
+  const startReboot = useMutation({
+    mutationFn: () => api.post<RebootPreview>(`/onus/${id}/reboot`),
+    onSuccess: (r) => {
+      setMessage(null);
+      setReboot(r);
+    },
+    onError: (e) => setMessage({ text: e instanceof ApiError ? e.message : 'Reboot failed.', tone: 'critical' }),
+  });
+  const confirmReboot = useMutation({
+    mutationFn: async (r: RebootPreview) => {
+      await api.post(`/jobs/${r.id}/confirm`, { previewSha256: r.previewSha256 });
+      return r.id;
+    },
+    onSuccess: (jobId) => {
+      setReboot(null);
+      setMessage({ text: 'Sending the reboot to the OLT…', tone: 'neutral', jobId });
+      setFollow({ id: jobId, kind: 'reboot' });
+    },
+    onError: (e) => {
+      setReboot(null);
+      setMessage({ text: e instanceof ApiError ? e.message : 'Reboot failed.', tone: 'critical' });
+    },
+  });
+  const dismissReboot = () => {
+    // The preview job is not needed any more; cancel it so it does not linger.
+    if (reboot) void api.post(`/jobs/${reboot.id}/cancel`).catch(() => undefined);
+    setReboot(null);
+  };
 
   if (!onu.data) return <Loading>{onu.isError ? 'ONU not found.' : 'Loading…'}</Loading>;
   const o = onu.data;
@@ -118,6 +162,17 @@ export function OnuDetailPage() {
   const rx = points.map((p) => p.rxDbm).filter((v): v is number => v !== null);
   const avgRx = rx.length ? rx.reduce((a, b) => a + b, 0) / rx.length : null;
   const minRx = rx.length ? Math.min(...rx) : null;
+  const busy = follow !== null;
+  const rebootBlocked =
+    o.archivedAt || o.removedAt
+      ? 'This ONU is no longer registered on the OLT'
+      : o.oltStatus !== 'ok'
+        ? 'The OLT is not being polled normally right now'
+        : olt && !olt.cliEnabled
+          ? 'CLI is not enabled for this OLT'
+          : o.phase && UNREACHABLE.has(o.phase)
+            ? 'The ONU is offline, so the OLT cannot reach it'
+            : null;
   const copy = async () => {
     await navigator.clipboard?.writeText(o.sn).catch(() => undefined);
     setCopied(true);
@@ -149,20 +204,58 @@ export function OnuDetailPage() {
             <Button variant="outline" onClick={() => void copy()}>
               {copied ? <Check /> : <Copy />} {copied ? 'Copied' : 'Copy SN'}
             </Button>
-            <Button onClick={() => refresh.mutate()} disabled={jobId !== null || refresh.isPending}>
-              <RefreshCw className={cx(jobId !== null && 'animate-spin')} /> {jobId !== null ? 'Loading…' : 'Refresh from OLT'}
+            <Button onClick={() => refresh.mutate()} disabled={busy || refresh.isPending}>
+              <RefreshCw className={cx(follow?.kind === 'refresh' && 'animate-spin')} /> {follow?.kind === 'refresh' ? 'Loading…' : 'Refresh from OLT'}
             </Button>
-            <DisabledAction reason="ONU reboot is outside the project scope (SPEC §11)">
-              <Power /> Reboot ONU
-            </DisabledAction>
+            <span title={rebootBlocked ?? undefined} className={cx('inline-flex', rebootBlocked && 'cursor-not-allowed')}>
+              <Button variant="outline-destructive" onClick={() => startReboot.mutate()} disabled={busy || reboot !== null || startReboot.isPending || rebootBlocked !== null}>
+                <Power className={cx(follow?.kind === 'reboot' && 'animate-pulse')} /> {follow?.kind === 'reboot' ? 'Rebooting…' : 'Reboot ONU'}
+              </Button>
+            </span>
           </>
         }
       />
 
       <PageBody>
+        {reboot && (
+          <form
+            role="dialog"
+            aria-label="Reboot ONU"
+            className="flex max-w-2xl flex-col gap-3 rounded-xl border border-critical/20 bg-critical-soft p-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              confirmReboot.mutate(reboot);
+            }}
+          >
+            <p className="text-sm font-medium">
+              Reboot <span className="font-mono">{o.sn}</span> ({o.name ?? `ONU ${o.onuIndex}`})?
+            </p>
+            <p className="text-sm">The customer&apos;s service drops while the ONU restarts, usually for 1–2 minutes. The OLT receives exactly these lines:</p>
+            <pre data-testid="reboot-preview" className="overflow-x-auto rounded-lg bg-code p-3 font-mono text-xs text-code-foreground">
+              {reboot.preview}
+            </pre>
+            <p className="break-all text-xs text-muted-foreground">sha256: {reboot.previewSha256}</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" variant="destructive" disabled={confirmReboot.isPending}>
+                <Power /> Reboot now
+              </Button>
+              <Button variant="outline" onClick={dismissReboot} disabled={confirmReboot.isPending}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        )}
         {message && (
           <Callout role="status" tone={message.tone}>
             {message.text}
+            {message.jobId !== undefined && (
+              <>
+                {' '}
+                <Link to={`/jobs/${message.jobId}`} className="font-medium underline">
+                  View job #{message.jobId}
+                </Link>
+              </>
+            )}
           </Callout>
         )}
 

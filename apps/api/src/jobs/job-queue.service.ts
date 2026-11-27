@@ -14,6 +14,7 @@ import {
   type UncfgScanJobData,
   uncfgScanJobOptions,
   type WriteJobData,
+  type WriteJobName,
   writeJobId,
   writeJobOptions,
 } from '@olt/shared/jobs';
@@ -74,7 +75,7 @@ export class JobQueueService implements OnApplicationShutdown {
   }
 
   /** Confirmed Fase 2 job -> the OLT queue (the worker re-checks everything). */
-  async enqueueWrite(oltId: number, jobId: number, name: 'provision.onu-register' | 'config.save'): Promise<void> {
+  async enqueueWrite(oltId: number, jobId: number, name: WriteJobName): Promise<void> {
     await this.queue(oltId).add(name, { jobId, oltId } satisfies WriteJobData, writeJobOptions(jobId, name));
   }
 

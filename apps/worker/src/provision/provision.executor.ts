@@ -1,12 +1,17 @@
 import {
   type AllowedCommand,
   expectedRegistrationLines,
+  type OnuRebootParams,
+  onuRebootParamsSchema,
+  parseDetailInfo,
   parseOnuState,
   parseWriteResult,
   previewSha256,
   provisionParamsSchema,
+  rebootOnu,
   registerOnuAndSave,
   renderPreview,
+  showOnuDetail,
   showOnuMngConfig,
   showOnuRunningConfig,
   showOnuState,
@@ -26,11 +31,12 @@ import { openOlt } from '../poller/context.js';
 type Fail = { status: 'failed' | 'blocked'; error: string; message?: string };
 
 /**
- * Fase 2 executor (SPEC §8.5): provision.onu-register (in the template of its mode) and config.save, on any OLT inside
- * OLT_TARGET_CIDRS (CLAUDE.md rule 3 since 2026-11-13). Everything the api checked is checked
- * again here, then commands go out one by one and the job stops at the first error. A verified
- * registration is saved with `write` in the same session. Write jobs are never retried once a
- * command may have been sent, so every exit path is an UnrecoverableError.
+ * Fase 2 executor (SPEC §8.5): provision.onu-register (in the template of its mode), config.save
+ * and onu.reboot, on any OLT inside OLT_TARGET_CIDRS (CLAUDE.md rule 3 since 2026-11-13).
+ * Everything the api checked is checked again here, then commands go out one by one and the job
+ * stops at the first error. A verified registration is saved with `write` in the same session; a
+ * reboot changes no configuration and has no `write`. Write jobs are never retried once a command
+ * may have been sent, so every exit path is an UnrecoverableError.
  */
 export async function processWriteJob(deps: CliDeps, job: Job<WriteJobData>): Promise<void> {
   const { prisma } = deps;
@@ -66,10 +72,14 @@ export async function processWriteJob(deps: CliDeps, job: Job<WriteJobData>): Pr
   // Re-validate and re-render: the confirmed hash must still match (§2.2 no. 4).
   let commands: AllowedCommand[];
   let params: ReturnType<typeof provisionParamsSchema.parse> | undefined;
+  let reboot: OnuRebootParams | undefined;
   try {
     if (row.kind === 'onu_register') {
       params = provisionParamsSchema.parse(row.params);
       commands = registerOnuAndSave(params);
+    } else if (row.kind === 'onu_reboot') {
+      reboot = onuRebootParamsSchema.parse(row.params);
+      commands = rebootOnu(reboot);
     } else if (row.kind === 'config_save') {
       commands = [writeConfig()];
     } else {
@@ -120,6 +130,30 @@ export async function processWriteJob(deps: CliDeps, job: Job<WriteJobData>): Pr
       before = { portRunningConfig: await session.run(showPortRunningConfig(pon)) };
       await prisma.job.update({ where: { id: jobId }, data: { beforeSnapshot: before } });
     }
+    if (reboot) {
+      // The ONU at that position must still be the one previewed (an ONU ID can be reused) and
+      // online (an offline ONU cannot be reached); otherwise `reboot` is not sent.
+      const where = `1/${reboot.slot}/${reboot.port}:${reboot.onuId}`;
+      let detail: ReturnType<typeof parseDetailInfo>;
+      try {
+        detail = parseDetailInfo(await session.run(showOnuDetail({ slot: reboot.slot, port: reboot.port, onuId: reboot.onuId })));
+      } catch (error) {
+        const line = error instanceof CliError ? error.line : (error as Error).name;
+        return await finish({ status: 'failed', error: 'onu_not_found', message: `ONU ${where} tidak terbaca di OLT (${line}); reboot tidak dikirim.` }, { transcript: transcript() });
+      }
+      if (detail.serialNumber.toUpperCase() !== reboot.sn) {
+        return await finish(
+          { status: 'failed', error: 'onu_mismatch', message: `ONU di ${where} bukan lagi ${reboot.sn}; reboot tidak dikirim. Muat ulang halaman ONU.` },
+          { observedSn: detail.serialNumber, transcript: transcript() },
+        );
+      }
+      if (detail.phase !== 'working') {
+        return await finish(
+          { status: 'failed', error: 'onu_not_online', message: `ONU ${reboot.sn} sedang ${detail.phaseLabel || 'tidak online'}; reboot tidak dikirim.` },
+          { transcript: transcript() },
+        );
+      }
+    }
 
     // A registration's last command (`write`) only goes out after verification, below.
     const apply = params ? commands.slice(0, -1) : commands;
@@ -132,8 +166,17 @@ export async function processWriteJob(deps: CliDeps, job: Job<WriteJobData>): Pr
         const line = error instanceof CliError ? error.line : (error as Error).name;
         return await finish({ status: 'failed', error: 'command_failed', message: `Perintah "${cmd.text}" gagal: ${line}` }, { failedCommand: cmd.text, transcript: transcript() });
       }
-      applied.push(cmd.text);
+      // A confirmed command (`reboot`) sent its previewed answer as well.
+      applied.push(...(cmd.confirm ? [cmd.text, cmd.confirm.answer] : [cmd.text]));
       await prisma.job.update({ where: { id: jobId }, data: { appliedCommands: applied } });
+    }
+
+    if (reboot) {
+      // The OLT took `reboot` and its answer without an error; the ONU restarts on its own and
+      // the status poll shows it going offline and coming back.
+      await prisma.job.update({ where: { id: jobId }, data: { status: 'succeeded', result: { transcript: transcript() } } });
+      await audit('job.succeeded', { applied: applied.length });
+      return;
     }
 
     await prisma.job.update({ where: { id: jobId }, data: { status: 'verifying' } });

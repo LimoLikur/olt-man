@@ -11,6 +11,7 @@ export const PERMISSIONS = {
   adminOlts: ['admin'],
   composeRegistration: ['admin', 'teknisi'],
   approveRegistration: ['admin', 'noc'],
+  rebootOnu: ['admin', 'noc', 'teknisi'],
   runJobs: ['admin'],
   manageUsers: ['admin'],
 } as const satisfies Record<string, readonly Role[]>;
@@ -24,6 +25,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   adminOlts: 'Change OLT credentials, accept identity changes, delete quarantined OLTs',
   composeRegistration: 'Compose ONU registrations (technicians submit them for approval)',
   approveRegistration: "Approve or reject technicians' registrations",
+  rebootOnu: 'Reboot ONUs (runs once the preview is confirmed, no approval)',
   runJobs: 'Save the OLT configuration (write) and other jobs',
   manageUsers: 'Reset NOC and technician passwords',
 };

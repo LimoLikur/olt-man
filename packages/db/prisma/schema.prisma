@@ -432,6 +432,8 @@ enum JobKind {
   list_sync
   /// Reads `show gpon onu uncfg`: unregistered ONUs for the registration page (read-only, 2026-11-13).
   uncfg_scan
+  /// `reboot` in the ONU's pon-onu-mng mode (template in SPEC §8.5, 2026-11-27). No `write`.
+  onu_reboot
 }
 
 enum JobStatus {

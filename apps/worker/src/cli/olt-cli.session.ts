@@ -42,9 +42,18 @@ export const LOGIN_PROMPT = new RegExp(String.raw`(?:^|\n)(${HOSTNAME})${MODE}#[
  * ends. Only the hostname read at login counts, so an output line that happens to end in "#" does not.
  */
 export function promptFor(hostname: string): RegExp {
-  const literal = hostname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(String.raw`(?:^|\n)${literal}${MODE}#[ ]?$`);
+  return new RegExp(String.raw`(?:^|\n)${escapeRegExp(hostname)}${MODE}#[ ]?$`);
 }
+
+/**
+ * The CLI mode the prompt at the end of `screen` shows: "" at the exec prompt, "(config)",
+ * "(gpon-onu-mng 1/2/8:2)". Undefined when the screen does not end in this OLT's prompt.
+ */
+export function promptMode(hostname: string, screen: string): string | undefined {
+  return new RegExp(String.raw`(?:^|\n)${escapeRegExp(hostname)}(${MODE})#[ ]?$`).exec(screen)?.[1];
+}
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const MORE = /--More--\s*$/;
 
 /** ssh2's "Handshake failed: no matching ..." -> "no matching ..."; anything else -> undefined. */
@@ -73,6 +82,9 @@ export class OltCliSession {
   private buffer = '';
   /** This OLT's prompt, from the hostname in the first prompt after login (promptFor). */
   private prompt: RegExp | undefined;
+  private hostname = '';
+  /** The CLI mode the last prompt showed (promptMode); a command with `inMode` is checked against it. */
+  private cliMode: string | undefined;
   private onData: (() => void) | undefined;
   private mode: 'read' | 'write' = 'read';
   private closed = false;
@@ -195,29 +207,47 @@ export class OltCliSession {
       throw e;
     }
     this.prompt = promptFor(hostname);
+    this.hostname = hostname;
+    this.cliMode = promptMode(hostname, this.buffer);
   }
 
   async run(cmd: AllowedCommand, timeoutMs = this.opts.commandTimeoutMs): Promise<string> {
     if (cmd.kind === 'write' && this.mode !== 'write') throw new WriteInReadSessionError();
     const prompt = this.prompt;
     if (!this.shell || this.closed || !prompt) throw new CliUnavailableError(this.target.name, 'session not open');
+    // A command bound to a CLI mode never goes out in another one (`reboot` outside pon-onu-mng).
+    if (cmd.inMode && (this.cliMode === undefined || !cmd.inMode.test(this.cliMode))) {
+      throw new CliError(this.target.name, `not sent: the prompt shows mode "${this.cliMode ?? '?'}"`);
+    }
     this.buffer = '';
     this.shell.write(`${cmd.text}\r`);
     const deadline = Date.now() + timeoutMs;
+    const question = cmd.confirm?.question;
+    let answered = false;
+    const asked = () => !answered && question !== undefined && question.test(this.buffer);
     for (;;) {
-      await this.until(() => prompt.test(this.buffer) || MORE.test(this.buffer), deadline - Date.now(), cmd.text);
+      await this.until(() => prompt.test(this.buffer) || MORE.test(this.buffer) || asked(), deadline - Date.now(), cmd.text);
       if (this.buffer.length > this.opts.maxOutputBytes) throw new CliError(this.target.name, 'output exceeds limit');
+      if (asked()) {
+        // The OLT asks before running the command (`reboot`): send the answer that was previewed.
+        answered = true;
+        this.shell.write(`${cmd.confirm!.answer}\r`);
+        continue;
+      }
       if (!MORE.test(this.buffer)) break;
       const before = this.buffer.length;
       this.shell.write(' ');
       await this.until(() => this.buffer.length > before, deadline - Date.now(), cmd.text);
     }
+    this.cliMode = promptMode(this.hostname, this.buffer);
     const lines = normalize(this.buffer).split('\n');
     // Drop the echoed command (first line) and the trailing prompt.
     const output = lines.slice(lines[0]?.trim().endsWith(cmd.text) ? 1 : 0, prompt.test(lines.at(-1) ?? '') ? -1 : undefined).join('\n');
     this.transcript.push({ command: cmd.text, output });
     const error = findCliError(output);
     if (error) throw new CliError(this.target.name, error);
+    // The question never came: what the OLT did with the command is unknown, so it is not a success.
+    if (question && !answered) throw new CliError(this.target.name, 'the OLT did not ask for confirmation');
     return output;
   }
 

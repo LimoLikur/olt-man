@@ -8,6 +8,7 @@ import { type AppRequest, clientIp, type SessionUser } from '../common/request.j
 import { PRISMA } from '../common/tokens.js';
 import { IdParam, iso, parse } from '../common/validation.js';
 import { JobQueueService } from './job-queue.service.js';
+import { assertWritable, isWriteJobKind, WRITE_JOB_NAME, type WriteJobKind } from './write-guard.js';
 
 /** Draft from the form; the ONU ID is chosen here, from the latest data. */
 const confirmSchema = z.strictObject({ previewSha256: z.string().regex(/^[0-9a-f]{64}$/) });
@@ -36,19 +37,23 @@ export class ProvisionController {
 
   /**
    * preview -> confirmed (SPEC §8.5): the body carries the hash of the preview the user saw.
-   * Admin: any Fase 2 job, runs at once. Teknisi: only an onu_register job they created (§14
-   * B18), and it goes to pending_approval: NOC or admin approves it before it runs.
+   * Admin: any Fase 2 job, runs at once. NOC and teknisi: an onu_reboot job they created, runs at
+   * once (owner decision 2026-11-27). Teknisi also: an onu_register job they created (§14 B18),
+   * which goes to pending_approval: NOC or admin approves it before it runs.
    */
-  @Roles('admin', 'teknisi')
+  @Roles('admin', 'noc', 'teknisi')
   @Post('jobs/:id/confirm')
   @HttpCode(200)
   async confirm(@Param('id', IdParam) id: number, @Body() body: unknown, @CurrentUser() user: SessionUser, @Req() req: AppRequest) {
     const { previewSha256: hash } = parse(confirmSchema, body);
     const job = await this.loadWriteJob(id);
-    if (user.role === 'teknisi' && (job.kind !== 'onu_register' || job.requestedBy !== user.id)) throw new ForbiddenException();
+    if (user.role !== 'admin') {
+      const own = job.requestedBy === user.id;
+      if (!own || !(job.kind === 'onu_reboot' || (user.role === 'teknisi' && job.kind === 'onu_register'))) throw new ForbiddenException();
+    }
     if (job.status !== 'preview') throw new ConflictException(`job berstatus ${job.status}`);
     if (hash !== job.previewSha256) throw new ConflictException('Preview sudah berubah. Buat preview ulang.');
-    if (user.role === 'teknisi') {
+    if (user.role === 'teknisi' && job.kind === 'onu_register') {
       const { count } = await this.prisma.job.updateMany({ where: { id, status: 'preview' }, data: { status: 'pending_approval' } });
       if (count !== 1) throw new ConflictException('job sudah diajukan');
       await this.audit.record({ actor: user.id, action: 'job.submitted', target: `job:${id}`, detail: { previewSha256: hash }, ip: clientIp(req) });
@@ -113,8 +118,8 @@ export class ProvisionController {
     return { id, status: 'rejected' };
   }
 
-  /** Admin or the owner, while the job has not started. */
-  @Roles('admin', 'teknisi')
+  /** Admin or the owner (NOC owns only its reboots), while the job has not started. */
+  @Roles('admin', 'noc', 'teknisi')
   @Post('jobs/:id/cancel')
   @HttpCode(200)
   async cancel(@Param('id', IdParam) id: number, @CurrentUser() user: SessionUser, @Req() req: AppRequest) {
@@ -133,15 +138,16 @@ export class ProvisionController {
   private async loadWriteJob(id: number) {
     const job = await this.prisma.job.findUnique({ where: { id } });
     if (!job) throw new NotFoundException();
-    if (job.kind !== 'onu_register' && job.kind !== 'config_save') throw new BadRequestException('job ini tidak perlu konfirmasi');
-    return job;
+    const { kind } = job;
+    if (!isWriteJobKind(kind)) throw new BadRequestException('job ini tidak perlu konfirmasi');
+    return { ...job, kind };
   }
 
   /** from -> confirmed (compare-and-set), then onto the OLT's queue. */
-  private async start(job: { id: number; oltId: number; kind: string }, from: 'preview' | 'pending_approval', userId: number) {
+  private async start(job: { id: number; oltId: number; kind: WriteJobKind }, from: 'preview' | 'pending_approval', userId: number) {
     const { count } = await this.prisma.job.updateMany({ where: { id: job.id, status: from }, data: { status: 'confirmed', confirmedBy: userId } });
     if (count !== 1) throw new ConflictException('job sudah diproses');
-    await this.queue.enqueueWrite(job.oltId, job.id, job.kind === 'onu_register' ? 'provision.onu-register' : 'config.save');
+    await this.queue.enqueueWrite(job.oltId, job.id, WRITE_JOB_NAME[job.kind]);
   }
 
   private async usernames(ids: (number | null)[]) {
@@ -158,7 +164,7 @@ export class ProvisionController {
   async saveConfig(@Param('id', IdParam) oltId: number, @CurrentUser() user: SessionUser, @Req() req: AppRequest) {
     const olt = await this.prisma.olt.findUnique({ where: { id: oltId } });
     if (!olt) throw new NotFoundException();
-    this.assertWritable(olt);
+    assertWritable(olt);
     const preview = renderPreview([writeConfig()]);
     const job = await this.prisma.job.create({ data: { oltId, kind: 'config_save', params: {}, preview, previewSha256: previewSha256(preview), status: 'preview', requestedBy: user.id } });
     await this.audit.record({ actor: user.id, action: 'job.preview', target: `job:${job.id}`, detail: { oltId, kind: 'config_save' }, ip: clientIp(req) });
@@ -292,12 +298,6 @@ export class ProvisionController {
     if (count === 0) throw new ConflictException(`${label} sudah ada di daftar.`);
   }
 
-  /** Write guard 1 (SPEC §8.5): the OLT is polled fine and has CLI on; the worker checks the rest. */
-  private assertWritable(olt: { status: string; cliEnabled: boolean }) {
-    if (olt.status !== 'ok') throw new ConflictException(`OLT berstatus ${olt.status}; Fase 2 ditunda.`);
-    if (!olt.cliEnabled) throw new ConflictException('CLI belum aktif untuk OLT ini.');
-  }
-
   /**
    * draft -> preview (SPEC §8.5): write guard 1, allowlist, next free ONU ID, rendered by the
    * olt-spec builder in the template of the chosen mode (registration, then `write`), stored
@@ -310,7 +310,7 @@ export class ProvisionController {
     const draft = parse(draftSchema, body);
     const olt = await this.prisma.olt.findUnique({ where: { id: draft.oltId } });
     if (!olt) throw new NotFoundException();
-    this.assertWritable(olt);
+    assertWritable(olt);
     // The ONU type is typed in the form: its schema bounds it and the OLT refuses an unknown one
     // (job stops there). Every VLAN and T-CONT profile must be on the OLT's lists (2026-11-13),
     // the Bridge Static bridging pair included.

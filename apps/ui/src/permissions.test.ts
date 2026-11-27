@@ -15,6 +15,10 @@ describe('can (SPEC §8.6)', () => {
     expect(can('noc', 'approveRegistration')).toBe(true);
   });
 
+  it('lets every role reboot ONUs (owner decision 2026-11-27)', () => {
+    for (const role of ['admin', 'noc', 'teknisi'] as const) expect(can(role, 'rebootOnu')).toBe(true);
+  });
+
   it('keeps users, credentials and write for admins', () => {
     for (const p of ['manageUsers', 'adminOlts', 'runJobs'] as const) {
       expect(can('admin', p)).toBe(true);

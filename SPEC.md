@@ -40,7 +40,7 @@ Dokumen ini menggantikan bagian brief yang bertentangan dengannya; bagian brief 
 | Perubahan identitas | Dalam waktu dekat hanya aktivasi SSH dan SNMPv3 | Pin awal setelah aktivasi; dua slot host key per OLT |
 | Riwayat ONU | Berlanjut bila posisi dan nama sama; nama berubah berarti pelanggan baru | §7 |
 | Template Fase 2 | Bab IV-A panduan (internet, VLAN tunggal) | Berbeda dari konfigurasi lapangan di hlm. 20; diganti sebelum ke OLT asli |
-| Konfirmasi Fase 2 | Teknisi mengajukan registrasi ONU miliknya, NOC atau admin menyetujui (job langsung jalan) atau menolak dengan alasan; job lain oleh admin | §8.6 |
+| Konfirmasi Fase 2 | Teknisi mengajukan registrasi ONU miliknya, NOC atau admin menyetujui (job langsung jalan) atau menolak dengan alasan; reboot ONU langsung jalan setelah pemiliknya (peran apa pun) mengonfirmasi preview (27 Nov 2026); job lain oleh admin | §8.6 |
 | `write` | Aksi admin terpisah; dashboard menampilkan perubahan yang belum disimpan | Job `config.save` |
 | Layanan Fase 2 | Internet saja | Multicast dan VoIP di luar lingkup |
 | Uji Fase 2 di OLT asli (setelah KP) | ONU cadangan di port non-kritis | §10 |
@@ -221,7 +221,7 @@ Semua perintah dibangun oleh builder di `olt-spec`; tidak ada endpoint atau fung
 | --- | --- | --- | --- |
 | `showOnuState` | `show gpon onu state gpon-olt_1/S/P` | baca | Cadangan status; cek ID ONU kosong |
 | `showPortRunningConfig` | `show running-config interface gpon-olt_1/S/P` | baca | Cadangan inventaris (index, tipe, SN); perlu diverifikasi |
-| `showOnuDetail` | `show gpon onu detail-info gpon-onu_1/S/P:N` | baca | Nama, riwayat offline, jarak, durasi online |
+| `showOnuDetail` | `show gpon onu detail-info gpon-onu_1/S/P:N` | baca | Nama, riwayat offline, jarak, durasi online; cek SN dan status sebelum reboot (§8.5) |
 | `showAttenuation` | `show pon power attenuation gpon-onu_1/S/P:N` | baca | Tx, Rx, dan atenuasi on-demand |
 | `showOnuInterface` | `show interface gpon-onu_1/S/P:N` | baca | Trafik sesaat on-demand |
 | `showOnuRunningConfig` | `show running-config interface gpon-onu_1/S/P:N` | baca | Snapshot dan verifikasi Fase 2 |
@@ -236,6 +236,7 @@ Semua perintah dibangun oleh builder di `olt-spec`; tidak ada endpoint atau fung
 | `registerOnuBridgeStatic` | Template mode `bridge_static` di §8.5 | tulis | Fase 2 (17 Nov 2026) |
 | `registerOnuPppoeJgl` | Template mode `pppoe_jgl` di §8.5 | tulis | Fase 2 (25 Nov 2026) |
 | `writeConfig` | `write` | tulis | Fase 2: otomatis setelah registrasi terverifikasi, atau manual oleh admin |
+| `rebootOnu` | Template reboot ONU di §8.5: `reboot` di mode `pon-onu-mng`, pertanyaan OLT dijawab `yes` | tulis | Reboot ONU (27 Nov 2026) |
 
 `show running-config` penuh sengaja tidak masuk allowlist karena memuat community SNMP dan password user OLT.
 
@@ -265,7 +266,7 @@ Setiap OLT punya antrian `olt:{oltId}` dengan global concurrency 1 (`setGlobalCo
 | `cli.onu-detail` | 1 | On-demand dari UI, maksimal 1 per ONU per 30 detik | SSH dengan pin |
 | `cli.uncfg-scan` | 1 | On-demand dari halaman registrasi (tombol "Refresh"), maksimal 1 per OLT per 15 detik, satu percobaan | SSH dengan pin, sesi baca |
 | `cli.list-sync` | 1 | On-demand oleh NOC/admin (tombol "Ambil dari OLT"), maksimal 1 per OLT per 30 detik, satu percobaan | SSH dengan pin, sesi baca: `show vlan summary` dan daftar profil T-CONT |
-| `provision.onu-register`, `config.save` | 1 | On-demand | OLT mock |
+| `provision.onu-register`, `config.save`, `onu.reboot` | 1 | On-demand | SSH dengan pin, sesi tulis (§8.5) |
 | `poll.status` | 2 | `status_interval_s` (default 60) dengan offset per OLT | SNMP |
 | `poll.optical` | 3 | 5 menit | SNMP |
 | `poll.metrics`, `poll.traffic` | 4 | 5 menit | SNMP (ditunda) |
@@ -305,10 +306,11 @@ Semua endpoint berada di bawah `/api`. Peran: A = admin (hanya dari LAN), N = NO
 | `GET /onus`, `GET /onus/:id` | Semua | Filter OLT, port, status, pita Rx; cari nama, SN, index |
 | `GET /onus/:id/metrics?from&to`, `GET /onus/:id/events` | Semua | — |
 | `POST /onus/:id/refresh` | Semua | Job `cli.onu-detail`; 409 bila CLI OLT belum aktif |
+| `POST /onus/:id/reboot` | Semua | Preview job `onu_reboot` untuk posisi dan SN ONU itu (§8.5); 409 bila guard tulis 1 gagal, ONU sudah tidak terdaftar, atau reboot ONU itu sedang antre/berjalan |
 | `GET /alarms`, `POST /alarms/:id/ack` | Semua; ack hanya A, N | — |
 | `POST /jobs` | A, T | Draft ke preview |
 | `GET /jobs/:id` | A, pemilik; N untuk `onu_register` | — |
-| `POST /jobs/:id/confirm` | A; T untuk `onu_register` miliknya | Body wajib membawa `previewSha256`. A: langsung jalan; T: menjadi `pending_approval` |
+| `POST /jobs/:id/confirm` | A; T untuk `onu_register` miliknya; N dan T untuk `onu_reboot` miliknya | Body wajib membawa `previewSha256`. A dan `onu_reboot`: langsung jalan; `onu_register` T: menjadi `pending_approval` |
 | `GET /approvals` | A, N | Registrasi teknisi yang menunggu persetujuan |
 | `POST /jobs/:id/approve` | A, N | `pending_approval` → `confirmed`; body membawa `previewSha256` yang dilihat penyetuju; job sendiri ditolak |
 | `POST /jobs/:id/reject` | A, N | `pending_approval` → `rejected`; alasan wajib dan terlihat oleh teknisi |
@@ -327,7 +329,7 @@ Halaman UI (responsif, berbahasa Inggris sejak 14 Nov 2026; tampilannya mengikut
 - `/`: dashboard per OLT berisi jumlah online dan tidak online, kotak port PON, alarm aktif, usia data, dan lencana identitas
 - `/olts`: daftar OLT dengan kartu yang sama
 - `/olts/:id`: jumlah ONU per fase (online/working, LOS, dying gasp, offline), port PON, identitas, dan perubahan belum disimpan
-- `/onus` dan `/onus/:id`: status, Rx, grafik, riwayat event, riwayat offline, tombol refresh
+- `/onus` dan `/onus/:id`: status, Rx, grafik, riwayat event, riwayat offline, tombol refresh dan reboot (§8.5)
 - `/alarms`
 - `/provision/new` dan `/jobs/:id`: Fase 2
 - `/admin/users` dan `/admin/audit`: ditunda
@@ -340,7 +342,7 @@ Kotak port PON dihitung dari daftar ONU OLT, jadi hanya port yang punya ONU yang
 
 Bagian bawah kartu OLT menampilkan kunci identitas OLT (host key SSH, engine ID SNMPv3, atau sysName dan sysObjectID untuk v2c), baik yang sudah di-pin maupun kandidat dari probe, supaya bisa dibandingkan dengan konsol OLT. Admin dan NOC mendapat tombol "Pin…" di samping lencana identitas selama masih ada jenis identitas yang belum di-pin. Tombol itu baru aktif bila ada kandidat dan meminta konfirmasi, lalu memanggil endpoint pin yang sama dengan panel identitas (§8.4 langkah 2). Untuk OLT yang dikarantina tidak ada tombol pin; perubahan tetap diterima admin di halaman OLT. Teknisi melihat kunci sebagai N/A.
 
-Slot data dari desain yang tidak dikumpulkan atau tidak diekspos sistem (mis. CPU, memori, suhu, uptime, dan uplink OLT; lokasi OLT; ID pelanggan, alamat, profil layanan, dan firmware ONU; email user) tetap ditampilkan dengan nilai "N/A". Aksi dari desain yang tidak didukung (reboot ONU, clear alarm, tambah user, ubah peran, aktif/nonaktif user, riwayat registrasi) tampil nonaktif dan tidak pernah dijalankan. Field yang didukung tetapi belum bernilai tampil "—".
+Slot data dari desain yang tidak dikumpulkan atau tidak diekspos sistem (mis. CPU, memori, suhu, uptime, dan uplink OLT; lokasi OLT; ID pelanggan, alamat, profil layanan, dan firmware ONU; email user) tetap ditampilkan dengan nilai "N/A". Aksi dari desain yang tidak didukung (clear alarm, tambah user, ubah peran, aktif/nonaktif user, riwayat registrasi) tampil nonaktif dan tidak pernah dijalankan. Field yang didukung tetapi belum bernilai tampil "—".
 
 Padanan label UI untuk istilah yang dikutip dalam Bahasa Indonesia di dokumen ini:
 
@@ -393,7 +395,7 @@ Model di technical brief tetap menjadi dasar, dengan perubahan berikut.
 | `alarm` | Tambah `severity`, `onu_id`, `parent_alarm_id` (penahanan), `ack_by`, `ack_at`, `cleared_at` |
 | `notification` (baru) | Outbox Telegram: `dedupe_key` unik, `payload`, `status`, `attempts`, `sent_at` |
 | `security_event` | `kind` ditambah `snmp_auth_failure`, `cli_auth_failed`, `admin_offlan_denied`, `write_guard_denied`, `trap_unknown_source` |
-| `job` | `kind`: identity_probe, onu_detail, port_sweep, onu_register, config_save. Tambah `preview_sha256`, `applied_commands`, `before_snapshot`, `after_snapshot`, `saved_by_job_id` |
+| `job` | `kind`: identity_probe, onu_detail, port_sweep, onu_register, config_save, list_sync, uncfg_scan, onu_reboot. Tambah `preview_sha256`, `applied_commands`, `before_snapshot`, `after_snapshot`, `saved_by_job_id` |
 | `provision_allowlist` (baru) | Per OLT: tipe ONU, profil T-CONT, dan VLAN yang boleh dipakai Fase 2 |
 | `onu_traffic`, `olt_metric`, `onu_metric_hourly` (baru) | Dibuat sejak awal; pengisinya ditunda |
 
@@ -480,6 +482,7 @@ Sejak 13 Nov 2026 Fase 2 dibuka untuk semua OLT asli (keputusan pemilik repo, `C
 | Registrasi ONU mode `bridge_static` ("Bridge Static", layanan static dan bridging lapangan), diikuti `write` setelah verifikasi | `onu_register` | A; T dengan persetujuan N | 17 Nov 2026 (OLT asli) |
 | Registrasi ONU mode `pppoe_jgl` ("PPPoE-JGL", sama dengan PPPoE MAP tetapi `vlan-profile briding`), diikuti `write` setelah verifikasi | `onu_register` | A; T dengan persetujuan N | 25 Nov 2026 (OLT asli) |
 | `write` (simpan running-config) | `config_save` | A | 13 Nov 2026 (OLT asli) |
+| Reboot ONU: `reboot` di mode `pon-onu-mng`, dijawab `yes`; tanpa `write` | `onu_reboot` | A, N, T; langsung jalan setelah pemiliknya mengonfirmasi preview, tanpa persetujuan | 27 Nov 2026 (OLT asli) |
 
 Status job mengikuti technical brief, dengan tambahan berikut:
 
@@ -627,6 +630,23 @@ Verifikasi mode `bridge_static` juga memeriksa:
 
 Seperti mode `bridge`, port LAN yang tidak dimiliki ONU menghentikan job di baris itu, tanpa rollback dan tanpa `write`.
 
+Template reboot ONU ditambahkan atas keputusan pemilik repo (27 Nov 2026) dari sesi CLI di OLT lapangan: di mode `pon-onu-mng`, `restart` ditolak OLT, sedangkan `reboot` bertanya `Confirm to reboot? [yes/no]:` sebelum dijalankan.
+
+```
+configure terminal
+pon-onu-mng gpon-onu_1/{slot}/{port}:{onuId}
+reboot
+yes
+end
+```
+
+- Parameter: `slot`, `port`, `onuId` (index ONU), dan `sn`, semuanya diambil `api` dari data ONU, bukan dari input pengguna. Validasinya sama dengan tabel parameter di bawah. Tombol "Reboot ONU" ada di halaman ONU.
+- Semua peran boleh me-reboot (keputusan pemilik repo 27 Nov 2026). Job langsung jalan setelah pemiliknya mengonfirmasi preview, tanpa persetujuan NOC. Admin juga boleh mengonfirmasi job orang lain. Hanya satu reboot per ONU yang boleh antre atau berjalan.
+- `yes` bukan perintah tersendiri. Ia jawaban atas pertanyaan OLT yang dikirim sesi CLI, dan tampil di preview sehingga ikut ter-hash. Bila pertanyaan itu tidak muncul, job `failed`, karena hasilnya tidak diketahui.
+- Sesi CLI hanya mengirim `reboot` selama prompt menunjukkan mode `pon-onu-mng` ONU itu, yaitu `(gpon-onu-mng 1/S/P:N)` atau `(gpon-onu-mng)`. Di mode lain, `reboot` bisa berarti restart OLT atau kartu.
+- Sebelum `reboot`, `worker` membaca `show gpon onu detail-info`. Bila SN ONU di posisi itu bukan lagi SN di preview (ID ONU bisa dipakai ulang), job gagal dengan `onu_mismatch`. Bila ONU tidak `working`, job gagal dengan `onu_not_online`. Pada kedua kasus `reboot` tidak dikirim.
+- Tidak ada verifikasi atau `write`, karena konfigurasi tidak berubah. Job `succeeded` bila OLT menerima `reboot` dan jawabannya tanpa error. ONU lalu offline sekitar 1–2 menit, dan perubahan statusnya terlihat lewat poll status seperti biasa, termasuk alarm yang mungkin muncul.
+
 Password PPPoE adalah parameter biasa (keputusan pemilik repo 15 Nov 2026). Isinya tersimpan dan tampil apa adanya, tanpa enkripsi, di:
 
 - `params` dan preview job, termasuk halaman job dan antrean persetujuan
@@ -673,6 +693,7 @@ Guard tulis, ketiganya wajib:
 | Ubah kredensial OLT, terima perubahan identitas (karantina), hapus OLT dengan perubahan identitas yang belum diterima, jendela pemeliharaan | Ya | — | — |
 | Fase 2: susun registrasi ONU | Ya, langsung jalan | — | Ya, diajukan untuk persetujuan |
 | Fase 2: setujui atau tolak registrasi teknisi | Ya | Ya | — |
+| Fase 2: reboot ONU (keputusan pemilik repo 27 Nov 2026) | Ya, langsung jalan | Ya, langsung jalan | Ya, langsung jalan |
 | Fase 2: `write` dan job lain | Ya | — | — |
 | Ganti password akun NOC dan teknisi, lihat audit log | Ya | — | — |
 
@@ -723,7 +744,7 @@ Daftar ini diminta ke pembimbing lapangan atau dikerjakan sendiri. Claude tidak 
 - Konfigurasi fisik dan sistem OLT: rack, shelf, kartu, IP manajemen, VLAN uplink, `snmp-server`, `username`, SSH, serta pembuatan `onu-type` dan profil T-CONT.
 - Perintah tulis apa pun ke OLT asli selama KP, SNMP SET, endpoint perintah bebas, dan rollback otomatis.
 - Telnet; netwatch, pemantauan ARP, dan ARP statis.
-- Multicast dan VoIP; reboot ONU, lock port ONU, dan `restore factory`; daftar ONU belum terdaftar (backlog di brief).
+- Multicast dan VoIP; lock port ONU dan `restore factory`; daftar ONU belum terdaftar (backlog di brief). Reboot ONU masuk lingkup sejak 27 Nov 2026 (§8.5).
 - Billing dan CRM, perangkat selain ZTE C320, high availability, dan modul prediksi TA.
 - VPN dan MFA (risiko diterima).
 - Ditunda sampai setelah demo, bukan dihapus: penerima trap, trafik per ONU, metrik OLT, halaman kelola user dan audit, rollup per jam, dan backup.
@@ -734,6 +755,7 @@ Daftar ini diminta ke pembimbing lapangan atau dikerjakan sendiri. Claude tidak 
 | --- | --- | --- |
 | UI publik tanpa VPN dan MFA; NOC dan teknisi masuk hanya dengan password | Diterima. Mitigasi: sesi pendek, rate limit, admin hanya dari LAN, `api` tanpa private key | Sebelum Fase 2 ke OLT asli |
 | NOC dan teknisi memakai Fase 2 dari internet ke OLT asli (NOC menyetujui registrasi teknisi) | Diterima (keputusan 13 Nov 2026): template, preview ber-hash, persetujuan, dan audit | Ditinjau berkala |
+| NOC dan teknisi me-reboot ONU dari internet tanpa persetujuan; akun yang diambil alih bisa memutus layanan pelanggan berulang kali | Diterima (keputusan 27 Nov 2026): template, preview ber-hash, cek SN dan status sebelum `reboot`, satu reboot per ONU sekaligus, dan audit | Ditinjau berkala |
 | NOC bisa mem-pin identitas OLT dari internet | Diterima (keputusan 10 Nov 2026); akun NOC yang diambil alih bisa mem-pin OLT palsu | Sebelum go-live |
 | Password default admin (`DataUtama*26`) tertulis di repo dan tidak wajib diganti | Diterima (keputusan 11 Nov 2026); admin hanya bisa login dari LAN kantor | Sebelum go-live |
 | NOC bisa menghapus OLT beserta seluruh riwayatnya dari internet | Diterima (keputusan 11 Nov 2026); konfirmasi nama OLT dan audit log, tanpa backup sampai go-live | Go-live (backup) |
@@ -818,8 +840,9 @@ Skrip `pnpm` dan perintah skenario di bawah dibuat di WP1 dan WP3, lalu dicatat 
     - Admin dari LAN menjalankan `write`; mock mencatat `write` dan panel menjadi kosong.
 16. Guard: job tulis untuk OLT yang belum `ok` atau CLI-nya nonaktif ditolak `api`; job untuk alamat di luar `OLT_TARGET_CIDRS` gagal di `worker` tanpa koneksi.
 17. Injeksi: SN berisi `\r\nreboot` dan nama berisi `;` atau baris baru ditolak di `api` dan di `worker`.
-18. Teknisi yang mengonfirmasi job orang lain atau job selain registrasi mendapat 403.
-19. Kredensial mock tidak ditemukan di `docker compose logs`, isi `job.result`, maupun respons `GET /olts/:id`.
+18. Teknisi yang mengonfirmasi job orang lain, atau job selain registrasi dan reboot ONU, mendapat 403.
+19. Reboot ONU: teknisi (atau NOC) membuka ONU yang working, menekan "Reboot ONU", lalu mengonfirmasi preview. Log mock menerima persis `configure terminal`, `pon-onu-mng …`, `reboot`, `yes`, `end`, tanpa `write`. ONU menjadi offline, lalu working lagi. ONU offline atau SN yang berubah sejak preview: job gagal tanpa `reboot`.
+20. Kredensial mock tidak ditemukan di `docker compose logs`, isi `job.result`, maupun respons `GET /olts/:id`.
 
 ### C. Akses internet, di VPS setelah domain siap
 

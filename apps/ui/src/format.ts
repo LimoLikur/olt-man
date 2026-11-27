@@ -151,6 +151,7 @@ export const PROVISION_MODE_LABEL: Record<string, string> = {
 export const JOB_KIND_LABEL: Record<string, string> = {
   onu_register: 'ONU registration',
   config_save: 'Save configuration (write)',
+  onu_reboot: 'ONU reboot',
   onu_detail: 'ONU detail',
   identity_probe: 'Identity probe',
   port_sweep: 'Port sweep',

@@ -43,9 +43,11 @@ export function JobPage() {
   const reject = useMutation({ mutationFn: () => api.post(`/jobs/${id}/reject`, { reason }), onSuccess: refresh, onError: fail });
   if (!q.data) return <Loading>{q.isError ? 'Job not found.' : 'Loading…'}</Loading>;
   const j = q.data;
-  const canConfirm = j.status === 'preview' && me.role !== 'noc' && (me.role === 'admin' || j.kind === 'onu_register');
+  // A reboot runs once its owner, whatever the role, confirms it (owner decision 2026-11-27); the api checks ownership.
+  const reboot = j.kind === 'onu_reboot';
+  const canConfirm = j.status === 'preview' && (reboot || (me.role !== 'noc' && (me.role === 'admin' || j.kind === 'onu_register')));
   const canApprove = j.status === 'pending_approval' && (me.role === 'admin' || me.role === 'noc');
-  const canCancel = me.role !== 'noc' && (j.status === 'preview' || j.status === 'pending_approval' || j.status === 'confirmed');
+  const canCancel = (reboot || me.role !== 'noc') && (j.status === 'preview' || j.status === 'pending_approval' || j.status === 'confirmed');
 
   return (
     <div>
@@ -71,6 +73,11 @@ export function JobPage() {
         {j.result?.message && (
           <Callout role="alert" tone={j.status === 'succeeded' ? 'warning' : 'critical'}>
             {j.result.message}
+          </Callout>
+        )}
+        {j.status === 'succeeded' && reboot && (
+          <Callout role="status" tone="success" icon={<Check />}>
+            The OLT accepted the reboot. The ONU restarts and is offline for about 1–2 minutes.
           </Callout>
         )}
         {j.status === 'succeeded' && j.result?.saved === true && (
@@ -111,7 +118,7 @@ export function JobPage() {
         <div className="flex flex-wrap gap-2">
           {canConfirm && (
             <Button onClick={() => confirm.mutate()} disabled={confirm.isPending}>
-              <Send /> {me.role === 'teknisi' ? 'Submit to NOC' : 'Confirm and run'}
+              <Send /> {me.role === 'teknisi' && !reboot ? 'Submit to NOC' : 'Confirm and run'}
             </Button>
           )}
           {canApprove && (

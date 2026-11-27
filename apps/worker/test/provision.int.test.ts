@@ -1,5 +1,5 @@
 import { startTestDatabase, type TestDatabase } from '@olt/db/testing';
-import { previewSha256, registerOnuAndSave, renderPreview, writeConfig } from '@olt/olt-spec';
+import { type OnuRebootParamsInput, previewSha256, rebootOnu, registerOnuAndSave, renderPreview, writeConfig } from '@olt/olt-spec';
 import { MOCK_CLI, MOCK_SNMP_V3 } from '@olt/shared';
 import { credentialAad, sealEnvelope } from '@olt/shared/crypto';
 import type { WriteJobData } from '@olt/shared/jobs';
@@ -281,5 +281,84 @@ describe('provision executor (I6)', () => {
       expect((await row(job.id)).result).toMatchObject({ error: 'verification_failed', missing: ['service bridging gemport 1 vlan 100', ...[1, 2, 3, 4].map(vlanPort)] });
       expect(sentWrites(since)).not.toContain('write');
     });
+  });
+});
+
+describe('onu.reboot (owner decision 2026-11-27)', () => {
+  const working = () => {
+    const o = mock.olt.onus.find((x) => x.phase === 'working')!;
+    return { slot: o.slot, port: o.port, onuId: o.onuId, sn: o.sn };
+  };
+  async function rebootJob(p: OnuRebootParamsInput) {
+    const preview = renderPreview(rebootOnu(p));
+    return db.prisma.job.create({ data: { oltId, kind: 'onu_reboot', params: p, preview, previewSha256: previewSha256(preview), status: 'confirmed' } });
+  }
+
+  it('reads the ONU first, then sends exactly the preview (`reboot` answered yes); no `write`; the ONU restarts', async () => {
+    const p = working();
+    const job = await rebootJob(p);
+    const since = mock.log.lastSeq;
+    const writes = mock.olt.writes;
+    await run(job.id);
+    const done = await row(job.id);
+    expect(done.status).toBe('succeeded');
+    expect(job.preview).toBe(['configure terminal', `pon-onu-mng gpon-onu_1/${p.slot}/${p.port}:${p.onuId}`, 'reboot', 'yes', 'end'].join('\n'));
+    expect(sentWrites(since).join('\n')).toBe(job.preview);
+    expect(done.appliedCommands).toEqual(job.preview!.split('\n'));
+    const cmds = mock.log.entries('ssh-command', since).map((c) => c.command);
+    const detail = cmds.indexOf(`show gpon onu detail-info gpon-onu_1/${p.slot}/${p.port}:${p.onuId}`);
+    expect(detail).toBeGreaterThanOrEqual(0);
+    expect(cmds.indexOf('reboot')).toBeGreaterThan(detail);
+    expect(mock.olt.reboots).toEqual([{ slot: p.slot, port: p.port, onuId: p.onuId }]);
+    expect(mock.olt.find(p)!.phase).toBe('offline');
+    expect(mock.olt.writes).toBe(writes);
+    expect(mock.olt.unsaved).toBe(false);
+    expect(done.savedByJobId).toBeNull();
+    expect(JSON.stringify(done.result)).toContain('Confirm to reboot?');
+    expect(JSON.stringify(done.result)).not.toContain(MOCK_CLI.password);
+    expect(await db.prisma.auditLog.count({ where: { action: 'job.succeeded', target: `job:${job.id}` } })).toBe(1);
+  });
+
+  it('another ONU at that position since the preview -> failed onu_mismatch, `reboot` not sent', async () => {
+    const p = working();
+    const job = await rebootJob({ ...p, sn: 'ZTEG0000FFFF' });
+    const since = mock.log.lastSeq;
+    await expect(run(job.id)).rejects.toThrow('onu_mismatch');
+    const done = await row(job.id);
+    expect(done.status).toBe('failed');
+    expect(done.result).toMatchObject({ observedSn: p.sn, message: expect.stringMatching(/bukan lagi ZTEG0000FFFF/) });
+    expect(sentWrites(since)).toEqual([]);
+    expect(mock.olt.reboots).toEqual([]);
+  });
+
+  it('an ONU that is not online -> failed onu_not_online, `reboot` not sent', async () => {
+    const o = mock.olt.onus.find((x) => x.phase !== 'working')!;
+    const job = await rebootJob({ slot: o.slot, port: o.port, onuId: o.onuId, sn: o.sn });
+    const since = mock.log.lastSeq;
+    await expect(run(job.id)).rejects.toThrow('onu_not_online');
+    expect(sentWrites(since)).toEqual([]);
+    expect(mock.olt.reboots).toEqual([]);
+  });
+
+  it('no ONU at that position -> failed onu_not_found, `reboot` not sent', async () => {
+    const job = await rebootJob({ slot: 1, port: 1, onuId: 120, sn: 'ZTEG0000FFFF' });
+    const since = mock.log.lastSeq;
+    await expect(run(job.id)).rejects.toThrow('onu_not_found');
+    expect(sentWrites(since)).toEqual([]);
+  });
+
+  it('params changed in the database after confirmation -> hash mismatch, no session', async () => {
+    const p = working();
+    const job = await rebootJob(p);
+    await db.prisma.job.update({ where: { id: job.id }, data: { params: { ...p, onuId: p.onuId + 1 } } });
+    const since = mock.log.lastSeq;
+    await expect(run(job.id)).rejects.toThrow('preview_mismatch');
+    expect(mock.log.entries('ssh-connect', since)).toHaveLength(0);
+  });
+
+  it('a payload that slipped into the database is re-validated', async () => {
+    const job = await rebootJob(working());
+    await db.prisma.job.update({ where: { id: job.id }, data: { params: { ...working(), sn: 'ZTEG0000000\r\nreboot' } } });
+    await expect(run(job.id)).rejects.toThrow('invalid_params');
   });
 });

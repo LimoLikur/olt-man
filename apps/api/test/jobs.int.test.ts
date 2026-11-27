@@ -1,4 +1,6 @@
-import { previewSha256, registerOnuAndSave, renderPreview } from '@olt/olt-spec';
+import { previewSha256, rebootOnu, registerOnuAndSave, renderPreview } from '@olt/olt-spec';
+import { oltQueueName, writeJobId } from '@olt/shared/jobs';
+import { Queue } from 'bullmq';
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
 import { call, type Client, login, startTestApi, type TestApi } from './helpers.js';
 
@@ -372,3 +374,81 @@ describe('uncfg ONUs (cli.uncfg-scan)', () => {
   });
 });
 
+
+describe('POST /onus/:id/reboot (owner decision 2026-11-27)', () => {
+  type Preview = { id: number; status: string; preview: string; previewSha256: string; params: Record<string, unknown> };
+  let onuId: number;
+  const onuWith = async (sn: string) => (await t.db.prisma.onu.findFirstOrThrow({ where: { oltId: mockId, sn } })).id;
+  const reboot = async (c: Client, id = onuId) => call(t, c, 'POST', `/onus/${id}/reboot`);
+  const queued = async (jobId: number) => {
+    const q = new Queue(oltQueueName(mockId), { connection: { url: t.redis.getConnectionUrl() } });
+    try {
+      return await q.getJob(writeJobId(jobId));
+    } finally {
+      await q.close();
+    }
+  };
+  beforeAll(async () => {
+    onuId = await onuWith('ZTEGAAAA0001');
+  });
+
+  it("every role gets the template for the ONU's position and SN, with its hash; audited; nothing queued yet", async () => {
+    const expected = renderPreview(rebootOnu({ slot: 1, port: 1, onuId: 1, sn: 'ZTEGAAAA0001' }));
+    expect(expected).toBe('configure terminal\npon-onu-mng gpon-onu_1/1/1:1\nreboot\nyes\nend');
+    for (const c of [admin, noc, teknisi]) {
+      const res = await reboot(c);
+      expect(res.status).toBe(201);
+      const body = res.body as Preview;
+      expect(body).toMatchObject({ status: 'preview', preview: expected, previewSha256: previewSha256(expected), params: { slot: 1, port: 1, onuId: 1, sn: 'ZTEGAAAA0001' } });
+      expect(await t.db.prisma.job.findUniqueOrThrow({ where: { id: body.id } })).toMatchObject({ kind: 'onu_reboot', status: 'preview' });
+      expect(await t.db.prisma.auditLog.findFirst({ where: { action: 'job.preview', target: `job:${body.id}` } })).toMatchObject({ detail: { kind: 'onu_reboot', onu: onuId } });
+      expect(await queued(body.id)).toBeUndefined();
+      // The owner can follow it on the job page.
+      expect((await call(t, c, 'GET', `/jobs/${body.id}`)).status).toBe(200);
+      await call(t, c, 'POST', `/jobs/${body.id}/cancel`);
+    }
+  });
+
+  it('NOC and teknisi confirm their own reboot: confirmed and queued at once, no approval; audited', async () => {
+    for (const c of [noc, teknisi]) {
+      const job = (await reboot(c)).body as Preview;
+      expect((await call(t, c, 'POST', `/jobs/${job.id}/confirm`, { previewSha256: '0'.repeat(64) })).status).toBe(409);
+      const res = await call(t, c, 'POST', `/jobs/${job.id}/confirm`, { previewSha256: job.previewSha256 });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ id: job.id, status: 'confirmed' });
+      expect((await queued(job.id))?.name).toBe('onu.reboot');
+      expect(await t.db.prisma.auditLog.count({ where: { action: 'job.confirmed', target: `job:${job.id}` } })).toBe(1);
+      // One reboot at a time per ONU.
+      expect((await reboot(c)).status).toBe(409);
+      await t.db.prisma.job.update({ where: { id: job.id }, data: { status: 'succeeded' } });
+    }
+    expect(await t.db.prisma.job.count({ where: { kind: 'onu_reboot', status: 'pending_approval' } })).toBe(0);
+  });
+
+  it("only its owner (or admin) confirms or cancels a reboot; NOC still cannot confirm others' jobs", async () => {
+    const job = (await reboot(teknisi)).body as Preview;
+    expect((await call(t, noc, 'POST', `/jobs/${job.id}/confirm`, { previewSha256: job.previewSha256 })).status).toBe(403);
+    expect((await call(t, noc, 'POST', `/jobs/${job.id}/cancel`)).status).toBe(403);
+    expect((await call(t, teknisi, 'POST', `/jobs/${job.id}/cancel`)).status).toBe(200);
+    const nocJob = (await reboot(noc)).body as Preview;
+    expect((await call(t, teknisi, 'POST', `/jobs/${nocJob.id}/confirm`, { previewSha256: nocJob.previewSha256 })).status).toBe(403);
+    expect((await call(t, noc, 'POST', `/jobs/${nocJob.id}/cancel`)).status).toBe(200);
+    const adminJob = (await reboot(admin)).body as Preview;
+    expect((await call(t, admin, 'POST', `/jobs/${adminJob.id}/confirm`, { previewSha256: adminJob.previewSha256 })).status).toBe(200);
+    await t.db.prisma.job.update({ where: { id: adminJob.id }, data: { status: 'succeeded' } });
+    // A registration is still not NOC's to confirm, nor config.save teknisi's.
+    const reg = (await call(t, teknisi, 'POST', '/jobs', draft({ sn: 'ZTEG0000D001' }))).body as Preview;
+    expect((await call(t, noc, 'POST', `/jobs/${reg.id}/confirm`, { previewSha256: reg.previewSha256 })).status).toBe(403);
+  });
+
+  it('an archived ONU -> 409; OLT not ok or CLI off -> 409 (guard 1); unknown ONU -> 404', async () => {
+    expect((await reboot(noc, await onuWith('ZTEGAAAA0003'))).status).toBe(409);
+    expect((await reboot(noc, 999_999)).status).toBe(404);
+    for (const data of [{ status: 'stale' as const }, { cliEnabled: false }]) {
+      await t.db.prisma.olt.update({ where: { id: mockId }, data });
+      onTestFinished(() => t.db.prisma.olt.update({ where: { id: mockId }, data: { status: 'ok', cliEnabled: true } }).then(() => undefined));
+      expect((await reboot(noc)).status).toBe(409);
+      await t.db.prisma.olt.update({ where: { id: mockId }, data: { status: 'ok', cliEnabled: true } });
+    }
+  });
+});

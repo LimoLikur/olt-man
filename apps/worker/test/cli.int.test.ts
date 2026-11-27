@@ -1,5 +1,5 @@
 import { startTestDatabase, type TestDatabase } from '@olt/db/testing';
-import { showCard, showOnuState } from '@olt/olt-spec';
+import { rebootOnu, showCard, showOnuState } from '@olt/olt-spec';
 import { MOCK_CLI, MOCK_SNMP_V3 } from '@olt/shared';
 import { credentialAad, sealEnvelope } from '@olt/shared/crypto';
 import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
@@ -9,7 +9,7 @@ import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 // Test-only: mint a write command the way a Fase 2 builder (I1) will.
 import { mint } from '../../../packages/olt-spec/src/commands/allowed.js';
-import { CliAuthError, CliNegotiationError, HostKeyMismatchError, WriteInReadSessionError } from '../src/cli/errors.js';
+import { CliAuthError, CliError, CliNegotiationError, HostKeyMismatchError, WriteInReadSessionError } from '../src/cli/errors.js';
 import { enqueueOnuDetail, onuDetailBackoff, processOnuDetail, type CliDeps, type OnuDetailJobData } from '../src/cli/jobs/onu-detail.js';
 import { processListSync } from '../src/cli/jobs/list-sync.js';
 import { processUncfgScan } from '../src/cli/jobs/uncfg-scan.js';
@@ -118,6 +118,37 @@ describe('OltCliSession', () => {
     const since = mock.log.lastSeq;
     await expect(s.run(mint('write', 'write'))).rejects.toBeInstanceOf(WriteInReadSessionError);
     expect(mock.log.entries('ssh-command', since)).toHaveLength(0);
+    await s.close();
+  });
+
+  it("sends `reboot` only in its ONU's pon-onu-mng mode, then answers the OLT's question with the previewed yes", async () => {
+    const onu = mock.olt.onus.find((o) => o.phase === 'working')!;
+    const [conf, mng, reboot, end] = rebootOnu({ slot: onu.slot, port: onu.port, onuId: onu.onuId, sn: onu.sn });
+    const s = new OltCliSession(target(), guard);
+    await s.open('write');
+    await s.run(conf!);
+    // In config mode the same word would not reboot this ONU: refused before it reaches the wire.
+    const since = mock.log.lastSeq;
+    await expect(s.run(reboot!)).rejects.toThrow(/not sent: the prompt shows mode "\(config\)"/);
+    expect(mock.log.entries('ssh-command', since)).toHaveLength(0);
+    await s.run(mng!);
+    const out = await s.run(reboot!);
+    expect(out).toMatch(/Confirm to reboot\? \[yes\/no\]:yes$/);
+    expect(mock.log.entries('ssh-command', since).map((c) => c.command)).toEqual([mng!.text, 'reboot', 'yes']);
+    expect(mock.olt.reboots).toEqual([{ slot: onu.slot, port: onu.port, onuId: onu.onuId }]);
+    await s.run(end!);
+    // Another ONU's reboot is refused in this ONU's mode as well.
+    await s.run(conf!);
+    await s.run(mng!);
+    const other = rebootOnu({ slot: onu.slot, port: onu.port, onuId: onu.onuId === 1 ? 2 : 1, sn: onu.sn })[2]!;
+    await expect(s.run(other)).rejects.toBeInstanceOf(CliError);
+    await s.close();
+  });
+
+  it('a command whose question never comes is not a success', async () => {
+    const s = new OltCliSession(target(), guard);
+    await s.open('write');
+    await expect(s.run(mint('show card', 'read', { confirm: { question: /never asked$/, answer: 'yes' } }))).rejects.toThrow('the OLT did not ask for confirmation');
     await s.close();
   });
 

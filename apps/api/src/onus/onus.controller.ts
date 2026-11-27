@@ -1,5 +1,6 @@
 import { ConflictException, Controller, Get, HttpCode, HttpException, Inject, NotFoundException, Param, Post, Query, Req } from '@nestjs/common';
 import type { Prisma, PrismaClient } from '@olt/db';
+import { onuRebootParamsSchema, previewSha256, rebootOnu, renderPreview } from '@olt/olt-spec';
 import { metricsQuerySchema, onuQuerySchema, type OnuView } from '@olt/shared/dto';
 import { AuditService } from '../audit/audit.service.js';
 import { CurrentUser, Roles } from '../auth/decorators.js';
@@ -7,6 +8,7 @@ import { type AppRequest, clientIp, type SessionUser } from '../common/request.j
 import { CLOCK, type Clock, PRISMA } from '../common/tokens.js';
 import { IdParam, iso, num, parse } from '../common/validation.js';
 import { JobQueueService } from '../jobs/job-queue.service.js';
+import { assertWritable } from '../jobs/write-guard.js';
 
 const onuInclude = { ponPort: true, state: true, olt: { select: { name: true, status: true } } } satisfies Prisma.OnuInclude;
 type OnuRow = Prisma.OnuGetPayload<{ include: typeof onuInclude }>;
@@ -104,5 +106,32 @@ export class OnusController {
     if (jobId === null) throw new HttpException('Refresh ONU ini baru saja diminta; tunggu 30 detik.', 429);
     await this.audit.record({ actor: user.id, action: 'onu.refresh', target: `onu:${id}`, detail: { jobId }, ip: clientIp(req) });
     return { jobId };
+  }
+
+  /**
+   * ONU reboot (SPEC §8.5, owner decision 2026-11-27): every role. Write guard 1, then the
+   * olt-spec template for the ONU's position and SN, stored with its sha256 as a preview. It runs
+   * once its owner confirms that hash (POST /jobs/:id/confirm); nothing reaches an OLT here.
+   */
+  @Roles('admin', 'noc', 'teknisi')
+  @Post(':id/reboot')
+  async reboot(@Param('id', IdParam) id: number, @CurrentUser() user: SessionUser, @Req() req: AppRequest) {
+    const onu = await this.prisma.onu.findUnique({ where: { id }, include: { ponPort: true, olt: { select: { status: true, cliEnabled: true } } } });
+    if (!onu) throw new NotFoundException();
+    if (onu.archivedAt || onu.removedAt) throw new ConflictException('ONU ini sudah tidak terdaftar di OLT.');
+    assertWritable(onu.olt);
+    const parsed = onuRebootParamsSchema.safeParse({ slot: onu.ponPort.slot, port: onu.ponPort.port, onuId: onu.onuIndex, sn: onu.sn });
+    if (!parsed.success) throw new ConflictException('Posisi atau SN ONU ini tidak lolos validasi template reboot.');
+    const params = parsed.data;
+    // One at a time: a second reboot queued behind the first would only cut the customer off again.
+    const queued = await this.prisma.job.findFirst({
+      where: { oltId: onu.oltId, kind: 'onu_reboot', status: { in: ['confirmed', 'running'] }, params: { path: ['sn'], equals: params.sn } },
+      select: { id: true },
+    });
+    if (queued) throw new ConflictException(`Reboot ONU ini sedang berjalan (job #${queued.id}).`);
+    const preview = renderPreview(rebootOnu(params));
+    const job = await this.prisma.job.create({ data: { oltId: onu.oltId, kind: 'onu_reboot', params, preview, previewSha256: previewSha256(preview), status: 'preview', requestedBy: user.id } });
+    await this.audit.record({ actor: user.id, action: 'job.preview', target: `job:${job.id}`, detail: { oltId: onu.oltId, kind: 'onu_reboot', onu: id, params }, ip: clientIp(req) });
+    return { id: job.id, status: job.status, params, preview, previewSha256: job.previewSha256 };
   }
 }

@@ -11,6 +11,7 @@ export const JOB_PRIORITY = {
   'cli.uncfg-scan': 1,
   'provision.onu-register': 1,
   'config.save': 1,
+  'onu.reboot': 1,
   'poll.status': 2,
   'poll.optical': 3,
   'poll.metrics': 4,
@@ -78,8 +79,9 @@ export interface WriteJobData {
   jobId: number;
   oltId: number;
 }
+export type WriteJobName = 'provision.onu-register' | 'config.save' | 'onu.reboot';
 export const writeJobId = (jobId: number) => `write-${jobId}`;
-export const writeJobOptions = (jobId: number, name: 'provision.onu-register' | 'config.save') => ({
+export const writeJobOptions = (jobId: number, name: WriteJobName) => ({
   jobId: writeJobId(jobId),
   priority: JOB_PRIORITY[name],
   attempts: 1,

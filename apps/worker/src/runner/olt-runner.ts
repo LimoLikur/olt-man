@@ -156,6 +156,7 @@ export class OltRunner {
         return processUncfgScan(deps, job as Job<UncfgScanJobData>);
       case 'provision.onu-register':
       case 'config.save':
+      case 'onu.reboot':
         return processWriteJob(deps, job as Job<WriteJobData>);
       case 'identity.probe':
         return processIdentityProbe(deps, job as Job<IdentityProbeJobData>);
